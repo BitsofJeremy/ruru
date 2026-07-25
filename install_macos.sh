@@ -218,12 +218,15 @@ if ! "$NGINX_BIN" -t; then
     exit 1
 fi
 
-# Restart nginx as root (port 80 is privileged). `brew services` is root-safe.
-if [[ -x "$BREW_BIN" ]]; then
-    env "HOME=$REAL_HOME" "$BREW_BIN" services restart nginx
-else
-    "$NGINX_BIN" -s reload 2>/dev/null || "$NGINX_BIN"
-fi
+# Restart nginx AS THE REAL USER. nginx runs as a user LaunchAgent (gui/<uid>),
+# not a root LaunchDaemon -- `brew services restart nginx` run as root (this
+# script's ambient privilege under sudo) manages the ROOT launchd domain
+# instead, which is a no-op here and leaves the real, already-running user
+# nginx process untouched with its OLD config still loaded in memory (same
+# root-vs-user-GUI-domain trap as the app's own launchd agent, see step 5).
+# `nginx -s reload` sends the running master a graceful SIGHUP, which is
+# domain-agnostic and always reaches the right process.
+as_user "$NGINX_BIN" -s reload 2>/dev/null || as_user "$NGINX_BIN"
 
 # ---------------------------------------------------------------------------
 # 7. Summary
