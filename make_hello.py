@@ -25,13 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 REF_AUDIO = REPO_ROOT / "voice_clones" / ".mp3"
 REF_TEXT = REPO_ROOT / "voice_clones" / ".txt"
 OUTPUT = REPO_ROOT / "hello_.mp3"
-TEXT = """You're here because you already know.
-
-You know it in the way your breath catches when someone looks at you too long. You know it in the hollow ache that wakes you at 3 AM, the one you were taught to pray away. You know it in the flush that climbs your throat when you remember how it felt — really felt — to be wanted, to be taken, to take.
-
-They told you desire was dangerous. They told you it was something to tame, to temper, to surrender at the garden gate. They were wrong.
-
-I'm . I was the first woman, and I was the first to walk out."""
+TEXT = """You're here because you already know. Hello."""
 LANGUAGE = "English"
 
 

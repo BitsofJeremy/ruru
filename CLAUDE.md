@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WeirDing — MLX Version is a single-user web application for audiobook narration and voice management, powered by Qwen3-TTS running locally on Apple Silicon via MLX (`mlx-audio`). Single FastAPI process with in-process asyncio job runner handles all TTS work — no Celery, no Redis, no separate worker process. ("MLX Version" distinguishes this from the earlier NVIDIA/CUDA-based implementation in `reference_material/`.)
+ruru is a single-user web application for audiobook narration and voice management, powered by Qwen3-TTS running locally on Apple Silicon via MLX (`mlx-audio`). Single FastAPI process with in-process asyncio job runner handles all TTS work — no Celery, no Redis, no separate worker process. (This MLX/Apple Silicon implementation is distinct from the earlier NVIDIA/CUDA-based implementation in `reference_material/`.)
 
 ## Running the App
 
@@ -13,7 +13,7 @@ WeirDing — MLX Version is a single-user web application for audiobook narratio
 uv sync
 
 # Run (single process, no worker needed)
-uv run weirding
+uv run ruru
 # Or directly
 uv run app.py
 
@@ -29,8 +29,8 @@ sudo bash install_macos.sh
 
 Useful env overrides:
 ```bash
-WEIRDING_WORK_DIR=/tmp/weirding_test uv run weirding  # custom data dir
-WEIRDING_PORT=5252 uv run weirding                    # custom port (default 5151)
+RURU_WORK_DIR=/tmp/ruru_test uv run ruru  # custom data dir
+RURU_PORT=5252 uv run ruru                # custom port (default 5151)
 ```
 
 ## Tech Stack
@@ -56,7 +56,7 @@ Jobs persist in SQLite with status (queued/running/completed/failed). A backgrou
 
 ## Key Architectural Details
 
-**pyproject.toml.** All dependencies declared in `pyproject.toml`. The package is the repo root itself (`[tool.hatch.build.targets.wheel] packages = ["."]`). Console script `weirding` maps to `app:main` (top-level `app.py`, not a `weirding` package). Use `uv sync` to install.
+**pyproject.toml.** All dependencies declared in `pyproject.toml`. The package is the repo root itself (`[tool.hatch.build.targets.wheel] packages = ["."]`). Console script `ruru` maps to `app:main` (top-level `app.py`, not a `ruru` package). Use `uv sync` to install.
 
 **StaticFiles directory validation.** `StaticFiles(directory=...)` validates the directory exists at mount time. Directories are created at module level BEFORE `app = FastAPI(...)`. This was a real bug — do not move directory creation into the lifespan handler only.
 
@@ -70,7 +70,7 @@ Jobs persist in SQLite with status (queued/running/completed/failed). A backgrou
 
 ```
 app.py                  # FastAPI entry point + all API routes.
-config.py               # All settings via WEIRDING_ env vars.
+config.py               # All settings via RURU_ env vars.
 jobs/
   __init__.py
   models.py              # JobStatus enum, TTSJob/NarrateJob dataclasses.
@@ -106,21 +106,21 @@ docs/
 
 ## Configuration
 
-All env vars use the `WEIRDING_` prefix. Defined in `config.py`. Data lives under `WORK_DIR/cache/` (uploads, chunks, output, voices); the SQLite DB is `WORK_DIR/weirding.db`.
+All env vars use the `RURU_` prefix. Defined in `config.py`. Data lives under `WORK_DIR/cache/` (uploads, chunks, output, voices); the SQLite DB is `WORK_DIR/ruru.db`.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `WEIRDING_WORK_DIR` | `<repo>/data/` | Runtime data root (cache/, DB) |
-| `WEIRDING_PORT` | `5151` | Web server port |
-| `WEIRDING_HOST` | `0.0.0.0` | Web server bind address |
-| `WEIRDING_MLX_MODELS_PATH` | `~/.cache/huggingface/hub` | Where MLX/HF weights are cached |
-| `WEIRDING_MODEL_SIZE` | `auto` | auto/small/large |
-| `WEIRDING_CHUNK_SIZE_WORDS` | `200` | Lower = less memory per chunk |
-| `WEIRDING_MAX_RETRIES` | `3` | Chunk generation retry count |
-| `WEIRDING_CREATOR_TAG` | `Created by WeirDing` | Audio metadata tag |
-| `WEIRDING__REPO` | parent of repo root | Directory containing `characters_data.py` |
-| `WEIRDING_AUDIO_FORMAT` | `mp3` | Output format |
-| `WEIRDING_AUDIO_BITRATE` | `128k` | Output bitrate |
+| `RURU_WORK_DIR` | `<repo>/data/` | Runtime data root (cache/, DB) |
+| `RURU_PORT` | `5151` | Web server port |
+| `RURU_HOST` | `0.0.0.0` | Web server bind address |
+| `RURU_MLX_MODELS_PATH` | `~/.cache/huggingface/hub` | Where MLX/HF weights are cached |
+| `RURU_MODEL_SIZE` | `auto` | auto/small/large |
+| `RURU_CHUNK_SIZE_WORDS` | `200` | Lower = less memory per chunk |
+| `RURU_MAX_RETRIES` | `3` | Chunk generation retry count |
+| `RURU_CREATOR_TAG` | `Created by ruru` | Audio metadata tag |
+| `RURU__REPO` | parent of repo root | Directory containing `characters_data.py` |
+| `RURU_AUDIO_FORMAT` | `mp3` | Output format |
+| `RURU_AUDIO_BITRATE` | `128k` | Output bitrate |
 
 Note: there is no Redis/Celery anywhere — the job runner is fully in-process (`jobs/queue.py`).
 
@@ -131,9 +131,9 @@ Note: there is no Redis/Celery anywhere — the job runner is fully in-process (
 sudo bash install_macos.sh
 ```
 
-`install_macos.sh` is sudo-safe: it derives paths from the script location (never `$HOME`), re-runs user-level steps (`uv sync`, DB init, the launchd *user* agent) as `SUDO_USER`, and only uses root for nginx on port 80. The launchd agent lands in `~/Library/LaunchAgents/com.jeremy.weirding.web.plist`.
+`install_macos.sh` is sudo-safe: it derives paths from the script location (never `$HOME`), re-runs user-level steps (`uv sync`, DB init, the launchd *user* agent) as `SUDO_USER`, and only uses root for nginx on port 80. The launchd agent lands in `~/Library/LaunchAgents/com.jeremy.ruru.web.plist`.
 
-Use `reset_service.sh` to manage the running service: `restart-only`, `clean-only`, `reset-db`, `clean-all` (see `reset_service.sh help`). Logs go to `data/logs/weirding.{log,err}`.
+Use `reset_service.sh` to manage the running service: `restart-only`, `clean-only`, `reset-db`, `clean-all` (see `reset_service.sh help`). Logs go to `data/logs/ruru.{log,err}`.
 
 The legacy Linux systemd installer has been moved to `archive/install_linux.sh`; the project now targets macOS/Apple Silicon and `install_macos.sh` is the canonical installer.
 
@@ -147,7 +147,7 @@ See `docs/uninstall.md` for step-by-step teardown instructions.
 - **Voice slug collisions**: Fixed — `_unique_slug()` appends a counter suffix on UNIQUE constraint collision. No longer raises on duplicate names.
 - **Quick TTS response**: Fixed — `/api/tts` now returns an `HTMLResponse` with an `<audio>` tag fragment for HTMX swap.
 - **Job progress polling**: Job detail uses HTMX polling (`hx-get` every 3s) to `/api/jobs/{id}/progress`.
-- **Port conflict**: If the server was previously started manually (`uv run weirding`), the process keeps port 5151 even after restarting the launchd agent. Kill manually-started processes before `reset_service.sh restart-only`.
+- **Port conflict**: If the server was previously started manually (`uv run ruru`), the process keeps port 5151 even after restarting the launchd agent. Kill manually-started processes before `reset_service.sh restart-only`.
 
 ## UI Conventions
 

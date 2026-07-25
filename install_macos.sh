@@ -36,9 +36,7 @@ CACHE_DIR="$WORK_DIR/cache"
 LOG_DIR="$WORK_DIR/logs"
 PORT=5151
 LABEL="com.jeremy.ruru.web"
-OLD_LABEL="com.jeremy.weirding.web"
 PLIST_PATH="$REAL_HOME/Library/LaunchAgents/${LABEL}.plist"
-OLD_PLIST_PATH="$REAL_HOME/Library/LaunchAgents/${OLD_LABEL}.plist"
 
 VENV_PY="$APP_DIR/.venv/bin/python"
 VENV_BIN="$APP_DIR/.venv/bin/ruru"
@@ -89,10 +87,8 @@ fi
 c "🗄️  3/6  Initialising database (Base.metadata.create_all + migrations)..."
 as_user env "PYTHONPATH=$APP_DIR" "$VENV_PY" - <<'PY'
 import asyncio
-from config import DB_PATH, migrate_legacy_db_if_needed
+from config import DB_PATH
 from models.db import init_db
-if migrate_legacy_db_if_needed():
-    print("   migrated legacy weirding.db -> ruru.db (job history preserved)")
 asyncio.run(init_db(DB_PATH))
 print("   init_db OK ->", DB_PATH)
 PY
@@ -100,17 +96,6 @@ PY
 # ---------------------------------------------------------------------------
 # 5. launchd USER agent — plist + reload. Runs as real user, persists at login.
 # ---------------------------------------------------------------------------
-# MIGRATION: unload the OLD (pre-rebrand) WeirDing label first. If we skip
-# this, the old agent keeps holding port 5151 and the new com.jeremy.ruru.web
-# agent fails to bind (see "Port conflict" in CLAUDE.md Common Pitfalls).
-if [[ -f "$OLD_PLIST_PATH" ]] || as_user launchctl list "$OLD_LABEL" >/dev/null 2>&1; then
-    c "🔀 Migrating from old launchd label ${OLD_LABEL}..."
-    as_user launchctl bootout "gui/${REAL_UID}/${OLD_LABEL}" 2>/dev/null || true
-    as_user launchctl unload "$OLD_PLIST_PATH" 2>/dev/null || true
-    rm -f "$OLD_PLIST_PATH"
-    ok "   old agent ${OLD_LABEL} unloaded and removed"
-fi
-
 c "⚙️  4/6  Writing launchd agent plist..."
 mkdir -p "$(dirname "$PLIST_PATH")"
 cat > "$PLIST_PATH" <<EOF
@@ -183,15 +168,7 @@ NGINX_BIN="$(command -v nginx || echo "/opt/homebrew/bin/nginx")"
 NGINX_ETC="$("$BREW_BIN" --prefix 2>/dev/null || echo /opt/homebrew)/etc/nginx"
 NGINX_CONF_DIR="$NGINX_ETC/servers"
 NGINX_SITE="$NGINX_CONF_DIR/ruru.conf"
-OLD_NGINX_SITE="$NGINX_CONF_DIR/weirding.conf"
 mkdir -p "$NGINX_CONF_DIR"
-
-# MIGRATION: remove the old pre-rebrand nginx site fragment so we don't end
-# up with two server{} blocks both matching `server_name localhost;`.
-if [[ -f "$OLD_NGINX_SITE" ]]; then
-    c "🔀 Removing old nginx site fragment ${OLD_NGINX_SITE}..."
-    rm -f "$OLD_NGINX_SITE"
-fi
 
 # Ensure nginx.conf loads per-site fragments from servers/. Stock Homebrew
 # nginx.conf already has `include servers/*;` — only patch if missing.

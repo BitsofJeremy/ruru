@@ -1,12 +1,12 @@
-# slow-tts-weirding
+# slow-tts-ruru
 
-A skill to drive WeirDing's TTS over HTTP.
+A skill to drive ruru's TTS over HTTP.
 
 ## Usage
 
 ```bash
 # Generate a short clip with a specific voice
-agent://slow-tts-weirding/{"text": "Hello world", "voice_id": 42}
+agent://slow-tts-ruru/{"text": "Hello world", "voice_id": 42}
 ```
 
 ## Features
@@ -19,10 +19,10 @@ agent://slow-tts-weirding/{"text": "Hello world", "voice_id": 42}
 
 ## Configuration
 
-The skill expects WeirDing running at http://localhost:5151 (configurable via environment).
+The skill expects ruru running at http://localhost:5151 (configurable via environment).
 
 ## Requirements
 
-- WeirDing 0.0.3+ with the JSON API routes
+- ruru 0.0.3+ with the JSON API routes
 - Python 3.8+
 - HTTP client (requests)

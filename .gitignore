@@ -28,7 +28,7 @@ venv/
 *.swo
 
 # Project runtime / user data
-docs/plans/
+docs/
 clone_voices/
 example_epubs/
 data/
@@ -49,7 +49,6 @@ tasks/
 # Private/sensitive content removed for public release (see archive/private_removed_*)
 reference_material/
 sqlalchemy_orm_integration/
-docs/superpowers/
 characters_data.py
 _voices/
 hello_.mp3
