@@ -36,7 +36,6 @@ from config import (
     HOST,
     PORT,
     APP_VERSION,
-    migrate_legacy_db_if_needed,
 )
 from jobs.queue import get_runner, JobType
 from models.db import init_db, get_async_session
@@ -103,7 +102,6 @@ import asyncio
 
 async def app_lifespan(app):
     """FastAPI lifespan handler — replaces deprecated on_event."""
-    migrate_legacy_db_if_needed()
     await init_db(DB_PATH)
     seed_voices(DB_PATH, _REPO_ROOT, VOICE_DIR)
     try:

@@ -1,9 +1,6 @@
 """ruru configuration.
 
-Override with RURU_ prefixed env vars. The legacy WEIRDING_ prefix (from
-this app's original name) is still read as a deprecated fallback during the
-migration window -- see docs/migration.md. RURU_X always wins if both
-RURU_X and WEIRDING_X are set.
+Override with RURU_ prefixed env vars.
 """
 import logging
 import os
@@ -15,24 +12,8 @@ APP_VERSION = "0.0.3"
 
 
 def _env(name: str, default: str | None = None) -> str | None:
-    """Read RURU_{name}, falling back to the deprecated WEIRDING_{name}.
-
-    Logs a deprecation warning when only the legacy WEIRDING_ prefix is set,
-    so operators upgrading in place know to migrate their env/.env/launchd
-    config to the RURU_ prefix.
-    """
-    new_key = f"RURU_{name}"
-    old_key = f"WEIRDING_{name}"
-    if new_key in os.environ:
-        return os.environ[new_key]
-    if old_key in os.environ:
-        logger.warning(
-            "%s is deprecated and will stop working in a future release -- "
-            "use %s instead. See docs/migration.md.",
-            old_key, new_key,
-        )
-        return os.environ[old_key]
-    return default
+    """Read RURU_{name} from the environment."""
+    return os.environ.get(f"RURU_{name}", default)
 
 
 WORK_DIR = Path(_env("WORK_DIR", str(Path(__file__).parent.resolve() / "data")))
@@ -58,28 +39,6 @@ EPHERGENT_REPO = Path(_env(
     "EPHERGENT_REPO",
     str(Path(__file__).parent.parent.resolve())
 ))
-
-
-def migrate_legacy_db_if_needed(work_dir: Path = None, db_path: Path = None) -> bool:
-    """One-shot migration: rename a pre-rebrand `weirding.db` to `ruru.db`.
-
-    The WeirDing -> ruru rebrand changed the SQLite filename. Without this,
-    an existing install would silently lose its job/voice history on
-    upgrade (init_db would just create a fresh, empty ruru.db next to the
-    orphaned weirding.db). Only renames when the new path doesn't already
-    exist; never touches/deletes the legacy file otherwise. Call once at
-    app startup, before init_db().
-    """
-    work_dir = work_dir if work_dir is not None else WORK_DIR
-    db_path = db_path if db_path is not None else DB_PATH
-    legacy_db_path = Path(work_dir) / "weirding.db"
-
-    if db_path.exists() or not legacy_db_path.exists():
-        return False
-
-    legacy_db_path.rename(db_path)
-    logger.info("Migrated legacy database %s -> %s", legacy_db_path, db_path)
-    return True
 
 
 def ensure_dirs():

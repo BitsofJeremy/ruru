@@ -21,24 +21,13 @@ MAX_DURATION_RATIO = 2.5
 
 
 def _env(name: str, default: str) -> str:
-    """Read RURU_{name}, falling back to the deprecated WEIRDING_{name}.
+    """Read RURU_{name} from the environment.
 
     Mirrors config._env() -- kept local here (rather than imported) so this
     module's env resolution doesn't depend on import order relative to
-    config.py. See docs/migration.md for the WEIRDING_ -> RURU_ migration.
+    config.py.
     """
-    new_key = f"RURU_{name}"
-    old_key = f"WEIRDING_{name}"
-    if new_key in os.environ:
-        return os.environ[new_key]
-    if old_key in os.environ:
-        logger.warning(
-            "%s is deprecated and will stop working in a future release -- "
-            "use %s instead. See docs/migration.md.",
-            old_key, new_key,
-        )
-        return os.environ[old_key]
-    return default
+    return os.environ.get(f"RURU_{name}", default)
 
 
 WORK_DIR = Path(_env("WORK_DIR", str(Path(__file__).parent.parent.resolve() / "data")))

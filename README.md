@@ -10,7 +10,7 @@ Audiobook narration engine powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen
 
 ruru is a single-user web application built with FastAPI and HTMX. It ships with one pre-seeded default voice (Lilith), and supports creating new voices via voice cloning or voice design. (Ephergent-style character-voice bulk seeding is an optional, local-only feature for developers who supply their own `characters_data.py` — it is not part of the public release.)
 
-The name is a nod to ruru, the morepork owl — known for its distinctive two-note night call, fitting for a tool that runs overnight turning books into audio. (This project was previously named WeirDing; see [docs/migration.md](docs/migration.md) if you're upgrading an existing install.)
+The name is a nod to ruru, the morepork owl — known for its distinctive two-note night call, fitting for a tool that runs overnight turning books into audio.
 
 ## Documentation
 
@@ -76,7 +76,7 @@ tail -f data/logs/ruru.err
 
 ## Configuration
 
-All settings are controlled via environment variables with the `RURU_` prefix. (Upgrading from WeirDing? The old `WEIRDING_` prefix still works as a deprecated fallback — see [docs/migration.md](docs/migration.md).)
+All settings are controlled via environment variables with the `RURU_` prefix.
 
 | Variable | Default | Description |
 |---|---|---|
