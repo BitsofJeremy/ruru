@@ -12,12 +12,12 @@
 """Test EPUB parser output and optionally narrate with TTS.
 
 Usage (text-only, works on Mac):
-    uv run test_epub_parser.py
+    uv run epub_parser_check.py
 
 Usage (with TTS narration, requires GPU server):
-    uv run test_epub_parser.py --narrate
-    uv run test_epub_parser.py --narrate --chapters 1,2,3  # specific chapters
-    uv run test_epub_parser.py --narrate --max-chunks 5    # limit chunks for quick test
+    uv run epub_parser_check.py --narrate
+    uv run epub_parser_check.py --narrate --chapters 1,2,3  # specific chapters
+    uv run epub_parser_check.py --narrate --max-chunks 5    # limit chunks for quick test
 """
 import argparse
 import json

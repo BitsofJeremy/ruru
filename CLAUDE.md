@@ -164,7 +164,7 @@ The 10 Ephergent characters are defined in `characters_data.py` at the repo root
 
 Pytest suite lives in `tests/` (unit tests for chunker, assembler, parsers, config, db, job models/queue/tasks, and route tests for tts/voices/narrate/jobs). Run with `uv run pytest`. `pytest-asyncio` and `pytest-mock` are dev dependencies; MLX model loading is mocked (`tests/conftest.py` provides `MOCK_WAV` and fixtures) so tests do not touch the GPU.
 
-`test_epub_parser.py` at the repo root is a separate standalone manual script (PEP 723) for verifying EPUB parsing and optionally running real TTS narration against specific chapters. Use it directly with `uv run`.
+`epub_parser_check.py` at the repo root is a separate standalone manual script (PEP 723) for verifying EPUB parsing and optionally running real TTS narration against specific chapters. Named to avoid pytest's `test_*.py` collection (its plain functions aren't pytest tests). Use it directly with `uv run`.
 
 ## Known Issues
 
