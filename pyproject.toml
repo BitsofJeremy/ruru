@@ -11,8 +11,8 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "python-multipart>=0.0.6",
     "numpy>=1.24.0",
-    "mlx",
-    "mlx-audio",
+    "mlx ; sys_platform == 'darwin'",
+    "mlx-audio ; sys_platform == 'darwin'",
     "soundfile>=0.12.0",
     "pydub>=0.25.0",
     "ebooklib>=0.18",
@@ -21,6 +21,9 @@ dependencies = [
     "pillow>=10.0.0",
     "mutagen>=1.47",
 ]
+
+[project.optional-dependencies]
+cuda = ["torch>=2.0.0", "qwen-tts"]
 
 [project.scripts]
 ruru = "app:main"
