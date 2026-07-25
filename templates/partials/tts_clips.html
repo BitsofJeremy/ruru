@@ -1,0 +1,16 @@
+{% if clips %}
+<div class="space-y-3">
+  {% for clip in clips %}
+  <div class="bg-kj-card border border-kj-border rounded-lg p-4">
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <p class="text-sm text-kj-muted truncate">{{ clip.text }}</p>
+      <span class="text-xs text-kj-accent shrink-0">{{ clip.voice_name }}</span>
+    </div>
+    <audio controls src="/audio/output/{{ clip.audio_name }}" class="w-full"></audio>
+    <p class="text-xs text-kj-muted mt-1">{{ clip.created_at }}</p>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-kj-muted text-sm">No clips generated yet.</p>
+{% endif %}

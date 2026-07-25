@@ -1,0 +1,52 @@
+<div class="space-y-4">
+    <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold">Job {{ job.id }}: {{ job.title }}</h3>
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium
+            {% if job.status == 'completed' %}bg-green-500/20 text-green-400
+            {% elif job.status == 'failed' %}bg-red-500/20 text-red-400
+            {% elif job.status == 'cancelled' %}bg-gray-500/20 text-gray-400
+            {% else %}bg-blue-500/20 text-blue-400
+            {% endif %}">
+            {{ job.status }}
+        </span>
+    </div>
+
+    {% if job.status == 'completed' %}
+        <div class="space-y-2">
+            <p class="text-sm text-kj-muted">Completed successfully</p>
+            {% if job.output_path %}
+                <a href="/api/jobs/{{ job.id }}/download"
+                   class="inline-flex items-center px-3 py-1.5 bg-kj-accent/10 hover:bg-kj-accent/20 text-kj-accent text-sm rounded-lg border border-kj-accent/20 transition-colors">
+                    <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
+                    </svg>
+                    Download Audiobook
+                </a>
+            {% endif %}
+        </div>
+    {% elif job.status == 'failed' %}
+        <div class="space-y-2">
+            <p class="text-sm text-red-500">Failed: {{ job.message or 'unknown error' }}</p>
+        </div>
+    {% elif job.status == 'cancelled' %}
+        <div class="space-y-2">
+            <p class="text-sm text-gray-500">Cancelled</p>
+        </div>
+    {% else %}
+        <div class="space-y-4">
+            <div class="w-full bg-kj-border rounded-full h-2.5">
+                <div class="bg-kj-accent h-2.5 rounded-full transition-all duration-300"
+                     style="width: {{ job.progress }}%"></div>
+            </div>
+            <p class="text-sm text-kj-muted">Progress: {{ job.progress }}%</p>
+            <div class="space-y-2">
+                <button hx-get="/api/jobs/{{ job.id }}/cancel"
+                        hx-target="closest .space-y-4"
+                        hx-swap="outerHTML"
+                        class="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-sm rounded-lg border border-red-500/20 transition-colors">
+                    Cancel Job
+                </button>
+            </div>
+        </div>
+    {% endif %}
+</div>
