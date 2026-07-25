@@ -1,0 +1,26 @@
+/* ruru custom styles */
+audio {
+    width: 100%;
+    border-radius: 0.5rem;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+.pulse-dot {
+    animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+.progress-bar {
+    transition: width 0.5s ease;
+}
+
+/* HTMX indicator */
+.htmx-indicator {
+    display: none;
+}
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+    display: flex;
+}

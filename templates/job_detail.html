@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+
+{% block title %}Job: {{ job.title or "Untitled" }} - ruru{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <a href="/" class="text-kj-muted hover:text-kj-text text-sm">&larr; Back to Dashboard</a>
+            <h1 class="text-3xl font-bold mt-2">{{ job.title or "Untitled Job" }}</h1>
+        </div>
+        {% if job.status in ("queued", "running") %}
+        <form action="/api/jobs/{{ job.id }}/cancel" method="post">
+            <button type="submit"
+                    class="px-5 py-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 font-medium rounded-lg transition-colors border border-red-500/30">
+                Cancel Job
+            </button>
+        </form>
+        {% endif %}
+        {% if job.status not in ("queued", "running") %}
+        <button
+            hx-delete="/api/jobs/{{ job.id }}"
+            hx-confirm="Delete this job and its output file?"
+            class="px-5 py-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 font-medium rounded-lg transition-colors border border-red-500/30">
+            Delete Job
+        </button>
+        {% endif %}
+    </div>
+
+    <!-- Status card with polling -->
+    <div class="bg-kj-card border border-kj-border rounded-xl p-6">
+
+        {% if job.status in ("queued", "running") %}
+        <div id="progress"
+             hx-get="/api/jobs/{{ job.id }}/progress"
+             hx-trigger="load, every 3s until job:complete"
+             hx-swap="innerHTML swap:1s"
+             hx-on:job:complete="setTimeout(() => location.reload(), 800)"
+             class="mb-4">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-sm font-medium">Loading progress...</span>
+            </div>
+            <progress class="w-full h-2 rounded bg-kj-border" value="0" max="100"></progress>
+        </div>
+        {% else %}
+        {% if job.total_chunks and job.total_chunks > 0 %}
+        <div class="mb-4">
+            <progress class="w-full h-2 rounded bg-kj-border" value="{{ job.total_chunks }}" max="{{ job.total_chunks }}"></progress>
+            <p class="text-xs text-kj-muted mt-1">{{ job.completed_chunks or job.total_chunks }} / {{ job.total_chunks }} chunks</p>
+        </div>
+        {% endif %}
+        {% endif %}
+
+        <div id="progress-data">
+            <!-- Status badge -->
+            <div class="flex items-center gap-3 mb-5">
+                <h2 class="text-xl font-semibold">Status</h2>
+                {% if job.status == "running" %}
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-kj-accent2/20 text-kj-accent2">
+                        <span class="w-2 h-2 rounded-full bg-kj-accent2 pulse-dot"></span>
+                        Running
+                    </span>
+                {% elif job.status == "completed" %}
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-400/20 text-green-400">
+                        Completed
+                    </span>
+                {% elif job.status == "failed" %}
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-400/20 text-red-400">
+                        Failed
+                    </span>
+                {% elif job.status == "queued" %}
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-400/20 text-yellow-400">
+                        Queued
+                    </span>
+                {% elif job.status == "cancelled" %}
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-kj-border text-kj-muted">
+                        Cancelled
+                    </span>
+                {% endif %}
+            </div>
+
+            <!-- Progress bar -->
+            {% if job.total_chunks and job.total_chunks > 0 %}
+                {% set pct = (job.completed_chunks or 0) * 100 // job.total_chunks %}
+                <div class="mb-2">
+                    <div class="w-full bg-kj-bg rounded-full h-3">
+                        <div class="bg-kj-accent h-3 rounded-full progress-bar" style="width: {{ pct }}%"></div>
+                    </div>
+                </div>
+                <p class="text-sm text-kj-muted mb-5">
+                    {{ job.completed_chunks or 0 }} of {{ job.total_chunks }} chunks completed ({{ pct }}%)
+                </p>
+            {% endif %}
+
+            <!-- Details grid -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                    <p class="text-kj-muted">Voice</p>
+                    <p class="font-medium mt-1">{{ job.voice_name or "Unknown" }}</p>
+                </div>
+                <div>
+                    <p class="text-kj-muted">Format</p>
+                    <p class="font-medium mt-1">{{ (job.audio_format or "mp3")|upper }}</p>
+                </div>
+                <div>
+                    <p class="text-kj-muted">Created</p>
+                    <p class="font-medium mt-1">{{ job.created_at or "--" }}</p>
+                </div>
+                <div>
+                    <p class="text-kj-muted">Completed</p>
+                    <p class="font-medium mt-1">{{ job.completed_at or "--" }}</p>
+                </div>
+            </div>
+
+            <!-- Error message -->
+            {% if job.status == "failed" and job.error_message %}
+            <div class="mt-5 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <p class="text-red-400 text-sm font-medium">Error</p>
+                <p class="text-red-300 text-sm mt-1">{{ job.error_message }}</p>
+            </div>
+            {% endif %}
+
+            <!-- Completed audiobook (inside progress-data so HTMX updates it) -->
+            {% if job.status == "completed" and job.output_path %}
+            <div class="mt-6 pt-6 border-t border-kj-border space-y-4">
+                {% if job.status == "completed" and job.needs_rebuild %}
+                <div class="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg mb-4">
+                    <p class="text-yellow-400 text-sm font-medium">
+                        Audiobook is out of date (chapters regenerated).
+                        <button hx-post="/api/jobs/{{ job.id }}/rebuild-audiobook"
+                                class="ml-2 underline hover:no-underline">Rebuild</button>
+                    </p>
+                </div>
+                {% endif %}
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-semibold">Completed Audiobook</h3>
+                    <a href="/api/jobs/{{ job.id }}/download"
+                       class="inline-flex items-center gap-2 px-4 py-2 bg-kj-accent2 hover:bg-kj-accent2/80 text-white font-medium rounded-lg transition-colors text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        Download {{ (job.audio_format or "mp3")|upper }}
+                    </a>
+                </div>
+                <audio controls class="w-full">
+                    <source src="/audio/output/{{ job.output_path | basename }}" type="audio/{{ job.audio_format or 'mp3' }}">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Chapters list -->
+    {% if chapters %}
+    <div class="bg-kj-card border border-kj-border rounded-xl p-6">
+        <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+                <h2 class="text-xl font-semibold">Chapters</h2>
+                <button id="chapter-select-toggle"
+                        class="text-kj-muted hover:text-kj-text text-sm px-2 py-1 rounded transition-colors"
+                        type="button">
+                    Select
+                </button>
+            </div>
+            {% if job.status == "completed" and chapters | selectattr("audio_path") | list %}
+            <a href="/api/jobs/{{ job.id }}/download/zip"
+               class="inline-flex items-center gap-2 px-3 py-1.5 bg-kj-accent/20 hover:bg-kj-accent/30 text-kj-accent font-medium rounded-lg transition-colors text-sm border border-kj-accent/30">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                Download All as ZIP
+            </a>
+            {% endif %}
+        </div>
+
+        <!-- Regenerate selected button (hidden by default) -->
+        <div id="regenerate-selected-container" class="hidden mb-4">
+            <button id="regenerate-selected-btn"
+                    class="px-4 py-2 bg-kj-accent/20 hover:bg-kj-accent/30 text-kj-accent font-medium rounded-lg transition-colors text-sm border border-kj-accent/30"
+                    disabled>
+                Regenerate Selected
+            </button>
+            <span class="text-kj-muted text-xs ml-2"><span id="selected-count">0</span> selected</span>
+        </div>
+
+        <!-- Chapters table -->
+        <div class="divide-y divide-kj-border">
+            {% for chapter in chapters %}
+            <div class="py-3 flex items-center justify-between" data-chapter-idx="{{ chapter.idx }}">
+                <!-- Checkbox (hidden by default) -->
+                <input type="checkbox" class="chapter-checkbox hidden mr-3" data-chapter-idx="{{ chapter.idx }}">
+
+                <div class="flex-1">
+                    <p class="font-medium">{{ chapter.title or "Chapter " ~ (chapter.idx + 1) }}</p>
+                    <p class="text-kj-muted text-xs mt-0.5">{{ chapter.word_count or 0 }} words</p>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <!-- Regenerate button (single chapter) -->
+                    {% if job.status == "completed" %}
+                    <button class="regenerate-chapter-btn inline-flex items-center gap-1.5 px-3 py-1 bg-kj-accent/20 hover:bg-kj-accent/30 text-kj-accent font-medium rounded-lg transition-colors text-sm border border-kj-accent/30"
+                            data-job-id="{{ job.id }}"
+                            data-chapter-idx="{{ chapter.idx }}"
+                            title="Regenerate this chapter">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                    </button>
+                    {% endif %}
+
+                    <!-- Download button -->
+                    {% if chapter.audio_path %}
+                    <a href="/api/jobs/{{ job.id }}/chapters/{{ chapter.id }}/download"
+                       class="inline-flex items-center gap-1.5 px-3 py-1 bg-kj-accent2/20 hover:bg-kj-accent2/30 text-kj-accent2 font-medium rounded-lg transition-colors text-sm border border-kj-accent2/30">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        Download
+                    </a>
+                    {% else %}
+                    <span class="text-kj-muted text-xs">No audio</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script>
+    document.getElementById('chapter-select-toggle').addEventListener('click', function() {
+        const checkboxes = document.querySelectorAll('.chapter-checkbox');
+        const container = document.getElementById('regenerate-selected-container');
+        const allHidden = checkboxes[0]?.classList.contains('hidden');
+
+        checkboxes.forEach(cb => {
+            if (allHidden) {
+                cb.classList.remove('hidden');
+            } else {
+                cb.classList.add('hidden');
+                cb.checked = false;
+            }
+        });
+
+        if (allHidden) {
+            container.classList.remove('hidden');
+            this.textContent = 'Done';
+        } else {
+            container.classList.add('hidden');
+            this.textContent = 'Select';
+        }
+        updateRegenerateButtonState();
+    });
+
+    document.querySelectorAll('.chapter-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateRegenerateButtonState);
+    });
+
+    function updateRegenerateButtonState() {
+        const checked = document.querySelectorAll('.chapter-checkbox:checked').length;
+        const btn = document.getElementById('regenerate-selected-btn');
+        const countSpan = document.getElementById('selected-count');
+        countSpan.textContent = checked;
+        btn.disabled = checked === 0;
+    }
+
+    document.getElementById('regenerate-selected-btn').addEventListener('click', async function() {
+        const indices = Array.from(document.querySelectorAll('.chapter-checkbox:checked'))
+            .map(cb => parseInt(cb.dataset.chapterIdx));
+
+        if (!indices.length) return;
+
+        this.disabled = true;
+        const originalText = this.textContent;
+        this.textContent = 'Regenerating...';
+
+        try {
+            const response = await fetch(`/api/jobs/{{ job.id }}/chapters/regenerate-bulk`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({indices})
+            });
+
+            if (response.ok) {
+                // Trigger toast on body
+                document.body.dispatchEvent(new CustomEvent('showToast', {
+                    detail: {message: `Regenerating ${indices.length} chapter(s)...`, type: 'info'}
+                }));
+                // Reload chapter list after a delay
+                setTimeout(() => location.reload(), 2000);
+            } else {
+                document.body.dispatchEvent(new CustomEvent('showToast', {
+                    detail: {message: 'Bulk regenerate failed', type: 'error'}
+                }));
+            }
+        } catch (e) {
+            document.body.dispatchEvent(new CustomEvent('showToast', {
+                detail: {message: 'Network error: ' + e.message, type: 'error'}
+            }));
+        }
+
+        this.disabled = false;
+        this.textContent = originalText;
+    });
+
+    document.querySelectorAll('.regenerate-chapter-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const jobId = this.dataset.jobId;
+            const chapterIdx = this.dataset.chapterIdx;
+
+            this.disabled = true;
+            const originalHTML = this.innerHTML;
+            this.innerHTML = '<svg class="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>';
+
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/chapters/${chapterIdx}/regenerate`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    document.body.dispatchEvent(new CustomEvent('showToast', {
+                        detail: {message: 'Chapter regenerating...', type: 'info'}
+                    }));
+                    // Reload job detail after a delay
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    document.body.dispatchEvent(new CustomEvent('showToast', {
+                        detail: {message: 'Regenerate failed', type: 'error'}
+                    }));
+                    this.disabled = false;
+                    this.innerHTML = originalHTML;
+                }
+            } catch (e) {
+                document.body.dispatchEvent(new CustomEvent('showToast', {
+                    detail: {message: 'Network error: ' + e.message, type: 'error'}
+                }));
+                this.disabled = false;
+                this.innerHTML = originalHTML;
+            }
+        });
+    });
+    </script>
+    {% endif %}
+</div>
+{% endblock %}

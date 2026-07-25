@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ruru - Audiobook Narration Engine{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        kj: {
+                            /* Palette derived from icon.png (the ruru owl mark):
+                               deep forest-green background family with warm
+                               gold (owl eyes) and cream (owl belly/face) accents. */
+                            bg: '#14231d',
+                            card: '#1c322a',
+                            border: '#2c4a3d',
+                            accent: '#e8b93d',
+                            accent2: '#f0d9b5',
+                            text: '#eef2ee',
+                            muted: '#8fa89b',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="/static/js/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/toast.css">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="apple-touch-icon" href="/static/favicon-180.png">
+</head>
+<body class="bg-kj-bg text-kj-text min-h-screen flex">
+    <!-- Toast container for notifications -->
+    <div id="toast-container"></div>
+    <!-- Sidebar -->
+    <aside class="w-64 min-h-screen bg-kj-card border-r border-kj-border flex flex-col shrink-0">
+        <div class="p-6 border-b border-kj-border">
+            <a href="/" class="text-2xl font-bold tracking-tight">
+                <span class="text-kj-accent">ru</span><span class="text-kj-accent2">ru</span>
+            </a>
+            <p class="text-kj-muted text-xs mt-1">MLX Version &middot; Audiobook Narration Engine</p>
+        </div>
+        <nav class="flex-1 p-4 space-y-1">
+            <a href="/"
+               class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors
+                      {% block nav_home %}text-kj-muted hover:text-kj-text hover:bg-kj-bg{% endblock %}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z"/>
+                </svg>
+                Dashboard
+            </a>
+            <a href="/tts"
+               class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors
+                      {% block nav_tts %}text-kj-muted hover:text-kj-text hover:bg-kj-bg{% endblock %}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+                </svg>
+                Quick TTS
+            </a>
+            <a href="/voices"
+               class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors
+                      {% block nav_voices %}text-kj-muted hover:text-kj-text hover:bg-kj-bg{% endblock %}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                Voices
+            </a>
+            <a href="/narrate"
+               class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors
+                      {% block nav_narrate %}text-kj-muted hover:text-kj-text hover:bg-kj-bg{% endblock %}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                </svg>
+                Narrate
+            </a>
+        </nav>
+        <div class="p-4 border-t border-kj-border space-y-1">
+            <a href="/admin/storage"
+               class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors
+                      {% block nav_storage %}text-kj-muted hover:text-kj-text hover:bg-kj-bg{% endblock %}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+                </svg>
+                Storage Admin
+            </a>
+        </div>
+        <div class="p-4 border-t border-kj-border">
+            <p class="text-kj-muted text-xs text-center">Powered by Qwen3-TTS</p>
+        </div>
+        <div class="px-4 py-3 border-t border-kj-border space-y-2">
+            <p class="text-xs text-kj-muted font-mono">v{{ app_version }}</p>
+            <div class="flex items-center gap-2">
+                <a href="https://github.com/BitsofJeremy/ruru" target="_blank" rel="noopener noreferrer"
+                   class="text-xs text-kj-accent hover:text-kj-accent/80 transition" title="GitHub Repository">
+                    GitHub
+                </a>
+                <span class="text-kj-border text-xs">•</span>
+                <a href="https://jeremyschroeder.net" target="_blank" rel="noopener noreferrer"
+                   class="text-xs text-kj-accent2 hover:text-kj-accent2/80 transition" title="Jeremy Schroeder">
+                    jeremyschroeder.net
+                </a>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="flex-1 overflow-y-auto">
+        <div class="max-w-6xl mx-auto p-8">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <script src="/static/js/toast.js"></script>
+    <script src="/static/js/redirect.js"></script>
+</body>
+</html>

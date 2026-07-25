@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}Voice Library - ruru{% endblock %}
+
+{% block nav_voices %}text-kj-accent bg-kj-accent/10{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="flex items-center justify-between">
+        <h1 class="text-3xl font-bold">Voice Library</h1>
+        <a href="/voice/add"
+           class="px-5 py-2.5 bg-kj-accent2 hover:bg-kj-accent2/80 text-white font-medium rounded-lg transition-colors">
+            Add Voice
+        </a>
+        <button
+            hx-post="/api/voices/refresh"
+            hx-swap="none"
+            hx-on::after-request="setTimeout(() => location.reload(), 800)"
+            class="px-5 py-2.5 bg-kj-accent hover:bg-kj-accent/80 text-white font-medium rounded-lg transition-colors">
+            Refresh
+        </button>
+    </div>
+
+    {% if voices %}
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {% for voice in voices %}
+        <div class="bg-kj-card border border-kj-border rounded-xl overflow-hidden hover:border-kj-accent/50 transition flex flex-col">
+            <!-- Image -->
+            <div class="h-32 bg-kj-bg overflow-hidden">
+                {% if voice.image_path %}
+                    <img src="/static/voice-images/{{ voice.image_path | basename }}"
+                         alt="{{ voice.name }}"
+                         class="w-full h-full object-cover">
+                {% else %}
+                    <div class="w-full h-full flex items-center justify-center">
+                        <svg class="w-12 h-12 text-kj-muted/30" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" />
+                        </svg>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Voice info -->
+            <div class="p-4 space-y-2 flex flex-col flex-1">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-semibold">{{ voice.name }}</h3>
+                    {% if voice.voice_type == "" %}
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-500/20 text-purple-400"></span>
+                    {% elif voice.voice_type == "cloned" %}
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 text-blue-400">cloned</span>
+                    {% elif voice.voice_type == "designed" %}
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/20 text-green-400">designed</span>
+                    {% else %}
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-kj-border text-kj-muted">{{ voice.voice_type }}</span>
+                    {% endif %}
+                </div>
+
+                {% if voice.description %}
+                <p class="text-kj-muted text-sm line-clamp-3">{{ voice.description }}</p>
+                {% else %}
+                <p class="text-kj-muted/50 text-sm italic">No description</p>
+                {% endif %}
+
+                {% if voice.sample_audio_path %}
+                <audio controls preload="none" class="mt-2">
+                    <source src="/audio/voices/{{ voice.sample_audio_path|basename }}" type="audio/wav">
+                    Your browser does not support the audio element.
+                </audio>
+                {% elif voice.voice_type == "designed" %}
+                <div>
+                    <button
+                        hx-post="/api/voices/{{ voice.id }}/preview"
+                        hx-target="closest .bg-kj-card"
+                        hx-swap="outerHTML"
+                        hx-indicator="#preview-spinner-{{ voice.id }}"
+                        class="px-3 py-1.5 bg-kj-accent2/10 hover:bg-kj-accent2/20 text-kj-accent2 text-sm rounded-lg border border-kj-accent2/20 transition-colors">
+                        Generate Preview
+                    </button>
+                    <div id="preview-spinner-{{ voice.id }}" class="htmx-indicator flex items-center gap-2 text-kj-muted text-xs mt-2">
+                        <div class="animate-spin h-3 w-3 border-2 border-kj-accent2 border-t-transparent rounded-full"></div>
+                        <span>Generating preview&hellip; this may take a minute</span>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if voice.voice_type != "" %}
+                <div class="mt-auto pt-3 flex gap-2">
+                    <a href="/voice/{{ voice.id }}/edit"
+                       class="flex-1 px-3 py-1.5 bg-kj-accent/10 hover:bg-kj-accent/20 text-kj-accent text-sm rounded-lg border border-kj-accent/20 transition-colors text-center">
+                        Edit
+                    </a>
+                    <button
+                        hx-delete="/api/voices/{{ voice.id }}"
+                        hx-confirm="Delete '{{ voice.name | e }}'? This cannot be undone."
+                        hx-target="closest .bg-kj-card"
+                        hx-swap="outerHTML"
+                        class="flex-1 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-sm rounded-lg border border-red-500/20 transition-colors">
+                        Delete
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-kj-card border border-kj-border rounded-xl p-8 text-center">
+        <p class="text-kj-muted">No voices yet. <a href="/voice/add" class="text-kj-accent hover:underline">Add one</a> to get started.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

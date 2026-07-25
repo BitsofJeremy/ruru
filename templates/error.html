@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ status_code }} - ruru{% endblock %}
+{% block content %}
+<div class="flex flex-col items-center justify-center min-h-[60vh] text-center">
+    <p class="text-8xl font-bold text-kj-accent/30">{{ status_code }}</p>
+    <h1 class="text-2xl font-semibold mt-4 mb-2">{{ title }}</h1>
+    <p class="text-kj-muted mb-8">{{ detail }}</p>
+    <a href="/" class="px-6 py-2.5 bg-kj-accent2 hover:bg-kj-accent2/80 text-white font-medium rounded-lg transition-colors">
+        Back to Dashboard
+    </a>
+</div>
+{% endblock %}

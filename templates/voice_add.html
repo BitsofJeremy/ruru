@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Add Voice - ruru{% endblock %}
+
+{% block nav_voices %}text-kj-accent bg-kj-accent/10{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div>
+        <a href="/voices" class="text-kj-muted hover:text-kj-text text-sm">&larr; Back to Voices</a>
+        <h1 class="text-3xl font-bold mt-2">Add Voice</h1>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- Design section -->
+        <div class="bg-kj-card border border-kj-border rounded-xl p-6">
+            <h2 class="text-xl font-semibold mb-1">Create by Description</h2>
+            <p class="text-kj-muted text-sm mb-5">Design a new voice from a text description. No audio required.</p>
+
+            <form hx-post="/api/voices/design">
+                <div class="space-y-4">
+                    <div>
+                        <label for="design-name" class="block text-sm font-medium text-kj-muted mb-2">Name</label>
+                        <input type="text" name="name" id="design-name" required
+                               placeholder="e.g. Warm Narrator"
+                               class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent2">
+                    </div>
+                    <div>
+                        <label for="design-description" class="block text-sm font-medium text-kj-muted mb-2">Voice Description</label>
+                        <textarea name="description" id="design-description" rows="4" required
+                                  placeholder="Describe the voice: pitch, tone, accent, speaking pace..."
+                                  class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent2 resize-y"></textarea>
+                    </div>
+                    <div>
+                        <label for="design-style" class="block text-sm font-medium text-kj-muted mb-2">Speaking Style</label>
+                        <input type="text" name="speaking_style" id="design-style"
+                               placeholder="e.g. calm and measured, with dramatic pauses"
+                               class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent2">
+                    </div>
+                    <button type="submit"
+                            class="w-full px-6 py-2.5 bg-kj-accent2 hover:bg-kj-accent2/80 text-white font-medium rounded-lg transition-colors">
+                        Create Designed Voice
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Clone section -->
+        <div class="bg-kj-card border border-kj-border rounded-xl p-6">
+            <h2 class="text-xl font-semibold mb-1">Create by Cloning</h2>
+            <p class="text-kj-muted text-sm mb-5">Upload reference audio to clone an existing voice.</p>
+
+            <form hx-post="/api/voices/clone" hx-encoding="multipart/form-data">
+                <div class="space-y-4">
+                    <div>
+                        <label for="clone-name" class="block text-sm font-medium text-kj-muted mb-2">Name</label>
+                        <input type="text" name="name" id="clone-name" required
+                               placeholder="e.g. My Custom Voice"
+                               class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent">
+                    </div>
+                    <div>
+                        <label for="clone-description" class="block text-sm font-medium text-kj-muted mb-2">Description</label>
+                        <textarea name="description" id="clone-description" rows="3"
+                                  placeholder="Optional description of the voice..."
+                                  class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent resize-y"></textarea>
+                    </div>
+                    <!-- Reference audio -->
+                    <div>
+                        <label for="clone-audio" class="block text-sm font-medium text-kj-muted mb-2">Reference Audio</label>
+                        <input type="file" name="ref_audio" id="clone-audio" required accept=".wav,.mp3,.ogg,.flac"
+                               class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-kj-accent/20 file:text-kj-accent hover:file:bg-kj-accent/30">
+                    </div>
+                    <div>
+                        <label for="clone-text" class="block text-sm font-medium text-kj-muted mb-2">Reference Transcript</label>
+                        <textarea name="ref_text" id="clone-text" required rows="3"
+                                  placeholder="Exact transcript of the reference audio..."
+                                  class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent resize-y"></textarea>
+                    </div>
+                    <button type="submit"
+                            class="w-full px-6 py-2.5 bg-kj-accent hover:bg-kj-accent/80 text-white font-medium rounded-lg transition-colors">
+                        Create Cloned Voice
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

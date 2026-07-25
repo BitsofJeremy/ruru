@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Narrate - ruru{% endblock %}
+
+{% block nav_narrate %}text-kj-accent bg-kj-accent/10{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <h1 class="text-3xl font-bold">Narrate a Document</h1>
+    <p class="text-kj-muted">Upload an EPUB or TXT file and convert it to spoken audio.</p>
+
+    <div class="bg-kj-card border border-kj-border rounded-xl p-6 max-w-2xl">
+        <form hx-post="/api/narrate" hx-encoding="multipart/form-data" hx-disabled-elt="#narrate-submit">
+            <div class="space-y-5">
+                <!-- File upload -->
+                <div>
+                    <label for="document" class="block text-sm font-medium text-kj-muted mb-2">Document</label>
+                    <input type="file" name="document" id="document" required accept=".epub,.txt"
+                           hx-post="/api/narrate/preview"
+                           hx-trigger="change"
+                           hx-encoding="multipart/form-data"
+                           hx-include="[name='document']"
+                           hx-target="#chapter-preview"
+                           hx-indicator="#preview-spinner"
+                           class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-kj-accent/20 file:text-kj-accent hover:file:bg-kj-accent/30">
+                    <div class="flex items-center gap-2 htmx-indicator mt-2" id="preview-spinner">
+                        <svg class="animate-spin w-3 h-3 text-kj-accent" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <span class="text-xs text-kj-muted">Parsing document...</span>
+                    </div>
+                    <div id="chapter-preview"></div>
+                </div>
+
+                <!-- Voice selector -->
+                <div>
+                    <label for="voice_id" class="block text-sm font-medium text-kj-muted mb-2">Voice</label>
+                    <select name="voice_id" id="voice_id"
+                            class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                        {% for voice in voices %}
+                        <option value="{{ voice.id }}">{{ voice.name }}{% if voice.voice_type %} ({{ voice.voice_type }}){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Scope selector -->
+                <div>
+                    <label for="scope" class="block text-sm font-medium text-kj-muted mb-2">Scope</label>
+                    <select name="scope" id="scope"
+                            class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                        <option value="document">Full Document</option>
+                        <option value="chapter">Single Chapter</option>
+                    </select>
+                </div>
+
+                <!-- Scope index -->
+                <div>
+                    <label for="scope_index" class="block text-sm font-medium text-kj-muted mb-2">Chapter Index</label>
+                    <input type="number" name="scope_index" id="scope_index" min="0" value="0"
+                           placeholder="Chapter number (0-based)"
+                           class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent">
+                    <p class="text-kj-muted text-xs mt-1">Only used when scope is Single Chapter.</p>
+                </div>
+
+                <!-- Output format -->
+                <div>
+                    <label for="audio_format" class="block text-sm font-medium text-kj-muted mb-2">Output Format</label>
+                    <select name="audio_format" id="audio_format"
+                            class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                        <option value="mp3">MP3</option>
+                        <option value="m4a">M4A</option>
+                    </select>
+                </div>
+
+                <!-- Author -->
+                <div>
+                    <label for="author" class="block text-sm font-medium text-kj-muted mb-2">Author <span class="text-kj-muted/50 text-xs">(optional)</span></label>
+                    <input type="text" name="author" id="author"
+                           placeholder="e.g. J.R.R. Tolkien"
+                           class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent">
+                </div>
+
+                <!-- Cover Art -->
+                <div>
+                    <label for="cover_art" class="block text-sm font-medium text-kj-muted mb-2">Cover Art <span class="text-kj-muted/50 text-xs">(optional, JPEG or PNG)</span></label>
+                    <input type="file" name="cover_art" id="cover_art" accept=".jpg,.jpeg,.png"
+                           class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-kj-accent/20 file:text-kj-accent hover:file:bg-kj-accent/30">
+                    <p class="text-kj-muted text-xs mt-1">Embedded in MP3/M4A output. Not used for WAV.</p>
+                </div>
+
+                <!-- Submit -->
+                <button type="submit" id="narrate-submit"
+                        class="w-full px-6 py-2.5 bg-kj-accent hover:bg-kj-accent/80 text-white font-medium rounded-lg transition-colors">
+                    Start Narration
+                </button>
+                <div id="narrate-spinner" class="htmx-indicator flex items-center gap-3 text-kj-muted text-sm mt-2">
+                    <svg class="animate-spin w-4 h-4 text-kj-accent" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    Uploading and parsing document... you will be redirected to the job page.
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

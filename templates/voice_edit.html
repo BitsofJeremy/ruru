@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Edit Voice - ruru{% endblock %}
+{% block nav_voices %}text-kj-accent bg-kj-accent/10{% endblock %}
+{% block content %}
+<div class="space-y-8">
+    <div>
+        <a href="/voices" class="text-kj-muted hover:text-kj-text text-sm">&larr; Back to Voices</a>
+        <h1 class="text-3xl font-bold mt-2">Edit Voice</h1>
+    </div>
+
+    <div class="bg-kj-card border border-kj-border rounded-xl p-6 max-w-xl">
+        <form hx-post="/api/voices/{{ voice.id }}/update" data-voice-id="{{ voice.id }}">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-kj-muted mb-2">Name</label>
+                    <input type="text" name="name" required value="{{ voice.name }}"
+                           class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-kj-muted mb-2">Description</label>
+                    <textarea name="description" rows="4"
+                              class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent2 resize-y">{{ voice.description or "" }}</textarea>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-kj-muted mb-2">Speaking Style</label>
+                    <input type="text" name="speaking_style" value="{{ voice.speaking_style or '' }}"
+                           class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent2">
+                </div>
+                {% if voice.sample_audio_path %}
+                <div>
+                    <p class="text-sm font-medium text-kj-muted mb-2">Current Sample</p>
+                    <audio controls class="w-full">
+                        <source src="/audio/voices/{{ voice.sample_audio_path | basename }}" type="audio/wav">
+                    </audio>
+                </div>
+                {% endif %}
+                <!-- Voice Profile Image -->
+                <div class="mb-4">
+                    <label class="text-sm font-medium mb-2 block">Profile Image (Optional)</label>
+                    <p class="text-xs text-kj-muted mb-2">PNG or JPG, max 1MB, min 50x50 pixels</p>
+
+                    <!-- Current image display (if exists) -->
+                    {% if voice.image_path %}
+                    <div class="mb-3">
+                        <img src="/static/voice-images/{{ voice.image_path | basename }}"
+                             alt="{{ voice.name }}"
+                             class="w-24 h-24 rounded-lg object-cover border border-kj-border">
+                        <button type="button"
+                                id="delete-image-btn"
+                                hx-delete="/api/voices/{{ voice.id }}/image"
+                                class="mt-2 text-sm text-red-400 hover:text-red-300 transition">
+                            Remove Image
+                        </button>
+                    </div>
+                    {% endif %}
+
+                    <!-- Image upload -->
+                    <input type="file"
+                           id="image-upload"
+                           accept="image/png,image/jpeg"
+                           class="block w-full text-sm border border-kj-border rounded p-2 bg-kj-bg text-kj-text">
+
+                    <button type="button"
+                            id="upload-image-btn"
+                            class="mt-2 px-3 py-1 text-sm bg-kj-accent/20 hover:bg-kj-accent/30 text-kj-accent rounded transition">
+                        Upload Image
+                    </button>
+                </div>
+                <div class="flex gap-3 pt-2">
+                    <button type="submit"
+                            class="flex-1 px-6 py-2.5 bg-kj-accent2 hover:bg-kj-accent2/80 text-white font-medium rounded-lg transition-colors">
+                        Save Changes
+                    </button>
+                    <a href="/voices"
+                       class="px-6 py-2.5 bg-kj-card hover:bg-kj-border text-kj-text font-medium rounded-lg transition-colors border border-kj-border">
+                        Cancel
+                    </a>
+                </div>
+            </div>
+        </form>
+    </div>
+
+<script>
+document.getElementById('upload-image-btn').addEventListener('click', async () => {
+  const input = document.getElementById('image-upload');
+  if (!input.files.length) {
+    document.body.dispatchEvent(new CustomEvent('showToast', {
+      detail: { message: 'Please select an image', type: 'error' }
+    }));
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', input.files[0]);
+
+  const voiceId = document.querySelector('[data-voice-id]').dataset.voiceId;
+
+  const response = await fetch(`/api/voices/${voiceId}/image`, {
+    method: 'POST',
+    body: formData
+  });
+
+  if (response.ok) {
+    location.reload();
+  }
+});
+</script>
+</div>
+{% endblock %}

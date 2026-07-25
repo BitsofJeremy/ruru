@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block title %}Storage Management - ruru{% endblock %}
+
+{% block nav_storage %}text-kj-accent bg-kj-accent/10{% endblock %}
+
+{% block content %}
+<div class="p-6 space-y-6">
+  <h1 class="text-3xl font-bold">Storage Management</h1>
+
+  <!-- Stats -->
+  <div class="grid grid-cols-3 gap-4 bg-kj-card border border-kj-border rounded-lg p-4">
+    <div>
+      <p class="text-xs text-kj-muted mb-1">Total Files</p>
+      <p class="text-2xl font-bold">{{ file_count }}</p>
+    </div>
+    <div>
+      <p class="text-xs text-kj-muted mb-1">Total Size</p>
+      <p class="text-2xl font-bold">{{ total_size_mb }}MB</p>
+    </div>
+    <div>
+      <p class="text-xs text-kj-muted mb-1">Output Directory</p>
+      <p class="text-xs text-kj-accent font-mono">{{ output_dir }}</p>
+    </div>
+  </div>
+
+  <!-- Cleanup controls -->
+  <div class="bg-kj-card border border-kj-border rounded-lg p-4 space-y-3">
+    <h2 class="text-lg font-semibold">Cleanup Options</h2>
+    <div class="flex flex-wrap gap-3">
+      <button hx-post="/api/storage/cleanup-old?days=30"
+              hx-confirm="Delete files older than 30 days?"
+              class="inline-flex items-center gap-2 px-4 py-2 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 rounded transition">
+        Clean Files &gt; 30 Days
+      </button>
+      <button id="btn-delete-selected"
+              onclick="deleteSelected()"
+              disabled
+              class="inline-flex items-center gap-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded transition disabled:opacity-40 disabled:cursor-not-allowed">
+        Delete Selected (<span id="selected-count">0</span>)
+      </button>
+      <button onclick="deleteAll()"
+              class="inline-flex items-center gap-2 px-4 py-2 bg-red-700/30 hover:bg-red-700/50 text-red-300 rounded transition">
+        Delete All Files
+      </button>
+    </div>
+  </div>
+
+  <!-- Job History -->
+  <div class="bg-kj-card border border-kj-border rounded-lg p-4 space-y-3">
+    <h2 class="text-lg font-semibold">Job History</h2>
+    <p class="text-sm text-kj-muted">
+      {{ job_count }} job(s) total &bull; {{ clearable_job_count }} eligible to clear
+      (completed/failed/cancelled — queued and running jobs are always kept).
+    </p>
+    <div class="flex flex-wrap gap-3">
+      <button onclick="clearJobHistory()"
+              {% if clearable_job_count == 0 %}disabled{% endif %}
+              class="inline-flex items-center gap-2 px-4 py-2 bg-red-700/30 hover:bg-red-700/50 text-red-300 rounded transition disabled:opacity-40 disabled:cursor-not-allowed">
+        Clear Job History
+      </button>
+    </div>
+  </div>
+
+  <!-- File list -->
+  <div class="bg-kj-card border border-kj-border rounded-lg overflow-hidden">
+    <div class="px-4 py-3 border-b border-kj-border bg-kj-bg/50 flex items-center gap-3">
+      {% if files %}
+      <input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"
+             class="w-4 h-4 rounded border-kj-border bg-kj-bg accent-kj-accent cursor-pointer">
+      <label for="select-all" class="text-xs text-kj-muted cursor-pointer select-none">Select All</label>
+      <span class="text-kj-border">|</span>
+      {% endif %}
+      <h2 class="font-semibold">Output Files ({{ file_count }})</h2>
+    </div>
+
+    {% if files %}
+    <div class="divide-y divide-kj-border">
+      {% for file in files %}
+      <div class="px-4 py-3 flex items-center gap-3 hover:bg-kj-bg/50 transition">
+        <input type="checkbox" name="file-select" value="{{ file.name }}"
+               onchange="updateSelectionCount()"
+               class="w-4 h-4 rounded border-kj-border bg-kj-bg accent-kj-accent cursor-pointer shrink-0">
+        <div class="flex-1 min-w-0">
+          <p class="font-mono text-sm text-kj-text truncate">{{ file.name }}</p>
+          <p class="text-xs text-kj-muted">{{ file.size_mb }} MB • {{ file.created }}</p>
+        </div>
+        <button hx-delete="/api/storage/files/{{ file.name }}"
+                hx-confirm="Delete {{ file.name }}?"
+                class="px-3 py-1 text-sm text-red-400 hover:text-red-300 transition shrink-0">
+          Delete
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="px-4 py-6 text-center text-kj-muted">
+      No files in output directory
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+document.addEventListener('storageUpdated', () => {
+  setTimeout(() => location.reload(), 1000);
+});
+
+function getChecked() {
+  return Array.from(document.querySelectorAll('input[name="file-select"]:checked'))
+              .map(cb => cb.value);
+}
+
+function updateSelectionCount() {
+  const count = getChecked().length;
+  document.getElementById('selected-count').textContent = count;
+  document.getElementById('btn-delete-selected').disabled = count === 0;
+  // Sync select-all checkbox state
+  const all = document.querySelectorAll('input[name="file-select"]');
+  const selectAll = document.getElementById('select-all');
+  if (selectAll) selectAll.indeterminate = count > 0 && count < all.length;
+  if (selectAll) selectAll.checked = count > 0 && count === all.length;
+}
+
+function toggleSelectAll(cb) {
+  document.querySelectorAll('input[name="file-select"]')
+          .forEach(el => el.checked = cb.checked);
+  updateSelectionCount();
+}
+
+function fireToastFromResponse(res) {
+  try {
+    const trigger = JSON.parse(res.headers.get('HX-Trigger') || '{}');
+    if (trigger.showToast) {
+      document.dispatchEvent(new CustomEvent('showToast', {detail: trigger.showToast}));
+    }
+  } catch (_) {}
+  setTimeout(() => location.reload(), 1200);
+}
+
+function deleteSelected() {
+  const filenames = getChecked();
+  if (!filenames.length) return;
+  if (!confirm(`Delete ${filenames.length} selected file(s)?`)) return;
+  fetch('/api/storage/delete-selected', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({filenames}),
+  }).then(fireToastFromResponse);
+}
+
+function deleteAll() {
+  const total = document.querySelectorAll('input[name="file-select"]').length;
+  if (!total) return;
+  if (!confirm(`Delete ALL ${total} files? This cannot be undone.`)) return;
+  fetch('/api/storage/delete-all', {method: 'POST'})
+    .then(fireToastFromResponse);
+}
+
+function clearJobHistory() {
+  const total = {{ clearable_job_count }};
+  if (!total) return;
+  if (!confirm(`Clear ${total} job(s) from history? Running/queued jobs are kept. This cannot be undone.`)) return;
+  fetch('/api/storage/clear-jobs', {method: 'POST'})
+    .then(fireToastFromResponse);
+}
+</script>
+{% endblock %}

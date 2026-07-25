@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - ruru{% endblock %}
+
+{% block nav_home %}text-kj-accent bg-kj-accent/10{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <h1 class="text-3xl font-bold">Dashboard</h1>
+
+    <!-- Stat cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div class="bg-kj-card border border-kj-border rounded-xl p-6">
+            <p class="text-kj-muted text-sm font-medium">Voices</p>
+            <p class="text-3xl font-bold mt-2">{{ voices|length }}</p>
+        </div>
+        <div class="bg-kj-card border border-kj-border rounded-xl p-6">
+            <p class="text-kj-muted text-sm font-medium">Total Jobs</p>
+            <p class="text-3xl font-bold mt-2">{{ jobs|length }}</p>
+        </div>
+        <div class="bg-kj-card border border-kj-border rounded-xl p-6">
+            <p class="text-kj-muted text-sm font-medium">Running</p>
+            <p class="text-3xl font-bold mt-2 text-kj-accent2">
+                {{ jobs|selectattr("status", "equalto", "running")|list|length }}
+            </p>
+        </div>
+    </div>
+
+    <!-- Recent Jobs -->
+    <div class="bg-kj-card border border-kj-border rounded-xl p-6">
+        <h2 class="text-xl font-semibold mb-4">Recent Jobs</h2>
+
+        {% if jobs %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-kj-border text-kj-muted text-left">
+                        <th class="pb-3 pr-4">Title</th>
+                        <th class="pb-3 pr-4">Voice</th>
+                        <th class="pb-3 pr-4">Status</th>
+                        <th class="pb-3 pr-4">Progress</th>
+                        <th class="pb-3"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-kj-border">
+                    {% for job in jobs %}
+                    <tr class="hover:bg-kj-bg/50 transition-colors">
+                        <td class="py-3 pr-4 font-medium">
+                            <a href="/jobs/{{ job.id }}" class="text-kj-text hover:text-kj-accent transition-colors">{{ job.title or "Untitled" }}</a>
+                        </td>
+                        <td class="py-3 pr-4 text-kj-muted">{{ job.voice_name or "Unknown" }}</td>
+                        <td class="py-3 pr-4">
+                            {% if job.status == "running" %}
+                                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-kj-accent2/20 text-kj-accent2">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-kj-accent2 pulse-dot"></span>
+                                    Running
+                                </span>
+                            {% elif job.status == "completed" %}
+                                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-400/20 text-green-400">
+                                    Completed
+                                </span>
+                            {% elif job.status == "failed" %}
+                                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-400/20 text-red-400">
+                                    Failed
+                                </span>
+                            {% elif job.status == "queued" %}
+                                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-400/20 text-yellow-400">
+                                    Queued
+                                </span>
+                            {% else %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-kj-border text-kj-muted">
+                                    {{ job.status|capitalize }}
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 pr-4 w-48">
+                            {% if job.total_chunks and job.total_chunks > 0 %}
+                                {% set pct = (job.completed_chunks or 0) * 100 // job.total_chunks %}
+                                <div class="w-full bg-kj-bg rounded-full h-2">
+                                    <div class="bg-kj-accent h-2 rounded-full progress-bar" style="width: {{ pct }}%"></div>
+                                </div>
+                                <p class="text-xs text-kj-muted mt-1">{{ job.completed_chunks or 0 }}/{{ job.total_chunks }}</p>
+                            {% else %}
+                                <span class="text-kj-muted text-xs">--</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 text-right">
+                            <div class="flex items-center justify-end gap-2">
+                                <a href="/jobs/{{ job.id }}"
+                                   class="px-3 py-1 bg-kj-accent2/20 hover:bg-kj-accent2/30 text-kj-accent2 text-xs font-medium rounded-md transition-colors">
+                                    View
+                                </a>
+                                {% if job.status not in ("queued", "running") %}
+                                <button
+                                    hx-delete="/api/jobs/{{ job.id }}"
+                                    hx-confirm="Delete job '{{ job.title | e }}'?"
+                                    hx-target="closest tr"
+                                    hx-swap="outerHTML"
+                                    class="px-3 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-medium rounded-md transition-colors">
+                                    Delete
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-kj-muted text-center py-8">No jobs yet. Start by narrating a document or using Quick TTS.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

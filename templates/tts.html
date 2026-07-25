@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Quick TTS - ruru{% endblock %}
+
+{% block nav_tts %}text-kj-accent bg-kj-accent/10{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <h1 class="text-3xl font-bold">Quick TTS</h1>
+    <p class="text-kj-muted">Generate a single audio clip from text using any available voice.</p>
+
+    {% if active_jobs_count > 0 %}
+    <div class="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-4 text-yellow-400">
+        <strong>Narration job in progress</strong> — The Quick TTS form is disabled while {{ active_jobs_count }} job(s) are queued or running. Come back when they finish.
+    </div>
+    {% endif %}
+
+    <div{% if active_jobs_count > 0 %} class="opacity-50 pointer-events-none"{% endif %}>
+        <div class="bg-kj-card border border-kj-border rounded-xl p-6 max-w-2xl">
+            <form hx-post="/api/tts" hx-target="#tts-result" hx-swap="innerHTML" hx-indicator="#tts-spinner">
+            <div class="space-y-5">
+                <!-- Voice selector -->
+                <div>
+                    <label for="voice_id" class="block text-sm font-medium text-kj-muted mb-2">Voice</label>
+                    <select name="voice_id" id="voice_id"
+                            hx-get="/api/tts/voice-preview"
+                            hx-trigger="change"
+                            hx-target="#voice-preview"
+                            hx-include="[name='voice_id']"
+                            class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                        {% for voice in voices %}
+                        <option value="{{ voice.id }}">{{ voice.name }}{% if voice.voice_type %} ({{ voice.voice_type }}){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                    <div id="voice-preview" class="mt-2"></div>
+                </div>
+
+                <!-- Text input -->
+                <div>
+                    <label for="text" class="block text-sm font-medium text-kj-muted mb-2">Text</label>
+                    <textarea name="text" id="text" rows="5" required
+                              placeholder="Enter text to speak..."
+                              class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent resize-y"></textarea>
+                </div>
+
+                <!-- Format -->
+                <div>
+                    <label for="audio_format" class="block text-sm font-medium text-kj-muted mb-2">Format</label>
+                    <select name="audio_format" id="audio_format"
+                            class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                        <option value="wav">WAV (lossless)</option>
+                        <option value="mp3">MP3</option>
+                        <option value="m4a">M4A</option>
+                    </select>
+                </div>
+
+                <!-- Submit -->
+                <div class="flex items-center gap-4">
+                    <button type="submit"
+                            class="px-6 py-2.5 bg-kj-accent hover:bg-kj-accent/80 text-white font-medium rounded-lg transition-colors">
+                        Generate
+                    </button>
+                    <div id="tts-spinner" class="htmx-indicator flex items-center gap-2 text-kj-muted text-sm">
+                        <div class="animate-spin h-4 w-4 border-2 border-kj-accent2 border-t-transparent rounded-full"></div>
+                        <span>Generating audio... this may take a minute</span>
+                    </div>
+                </div>
+            </div>
+        </form>
+        </div>
+    </div>
+
+    <!-- Result area -->
+    <div id="tts-result" class="max-w-2xl"></div>
+
+    <!-- Clip history -->
+    <div class="max-w-2xl">
+        <h2 class="text-xl font-semibold mb-3">Recent Clips</h2>
+        <div id="tts-history"
+             hx-get="/api/tts/clips"
+             hx-trigger="load, refreshHistory from:body"
+             hx-swap="innerHTML">
+            <p class="text-kj-muted text-sm">Loading...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

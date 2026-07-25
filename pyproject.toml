@@ -1,0 +1,40 @@
+[project]
+name = "ruru"
+version = "0.0.3"
+description = "ruru - MLX Version: audiobook narration engine powered by Qwen3-TTS running locally on Apple Silicon via MLX"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "jinja2>=3.1.0",
+    "aiosqlite>=0.19.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "python-multipart>=0.0.6",
+    "numpy>=1.24.0",
+    "mlx",
+    "mlx-audio",
+    "soundfile>=0.12.0",
+    "pydub>=0.25.0",
+    "ebooklib>=0.18",
+    "beautifulsoup4>=4.12.0",
+    "html2text>=2024.2.0",
+    "pillow>=10.0.0",
+    "mutagen>=1.47",
+]
+
+[project.scripts]
+ruru = "app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[build-system]
+requires = ["hatch"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "pytest-mock>=3.15.1",
+]
