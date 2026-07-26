@@ -8,7 +8,31 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "0.0.3"
+def _app_version() -> str:
+    """Single-source the version so it can't drift between files.
+
+    `pyproject.toml` is checked first and is authoritative: the package is the
+    repo root itself, so ruru always runs from its source tree, and installed
+    metadata goes stale the moment you bump the version without re-syncing.
+    Falls back to package metadata (installed elsewhere), then to a literal.
+    """
+    pyproject = Path(__file__).parent / "pyproject.toml"
+    try:
+        for line in pyproject.read_text().splitlines():
+            if line.startswith("version"):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("ruru")
+    except PackageNotFoundError:
+        return "0.0.0"
+
+
+APP_VERSION = _app_version()
 
 
 def _env(name: str, default: str | None = None) -> str | None:
