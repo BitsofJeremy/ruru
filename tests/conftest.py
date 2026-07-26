@@ -42,18 +42,50 @@ async def init_db_fixture(tmp_db):
     return tmp_db
 
 
+def fake_audio(duration_s: float = 1.0, sr: int = 24000):
+    """A fake TTS result whose .write() actually creates the file on disk.
+
+    Handlers call result.write(output_path); a plain MagicMock would record the
+    call but leave no file behind, so write() is wired to create a real (tiny)
+    file and the output-path assertions stay meaningful.
+
+    ``.wav``/``.sr`` are set to a real array so run_narrate_document's
+    duration-based glitch check (len(wav)/sr) can compare against a genuine
+    number instead of a MagicMock; 1.0s comfortably covers the short (2-word)
+    chunk texts used in these tests (expected ~0.8s at the assumed 150 wpm).
+
+    It stays a MagicMock rather than a real TTSResult so tests can assert on
+    ``.write`` call counts.
+    """
+    audio = MagicMock()
+    audio.wav = np.zeros(int(duration_s * sr), dtype=np.float32)
+    audio.sr = sr
+
+    def _write(path):
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"fake-audio")
+
+    audio.write.side_effect = _write
+    return audio
+
+
 @pytest.fixture
 def mock_tts_engine():
-    """Mock TTSEngine that doesn't need GPU."""
-    with patch("engine.tts.TTSEngine") as mock_cls:
+    """Patch the backend factory so handlers get a GPU-free engine.
+
+    Yields the patched ``get_engine_class`` mock; the engine instance the
+    handlers will see is ``mock.return_value.return_value``.
+    """
+    with patch("engine.get_engine_class") as mock_factory:
         instance = MagicMock()
         instance.is_loaded = True
         instance.load = MagicMock()
         instance.unload = MagicMock()
-        instance.generate_clone = MagicMock(return_value=(MOCK_WAV, 24000))
-        instance.generate_design = MagicMock(return_value=(MOCK_WAV, 24000))
-        mock_cls.return_value = instance
-        yield mock_cls
+        instance.generate_clone = MagicMock(return_value=fake_audio())
+        instance.generate_design = MagicMock(return_value=fake_audio())
+        mock_factory.return_value.return_value = instance
+        yield mock_factory
 
 
 @pytest.fixture

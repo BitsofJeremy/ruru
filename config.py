@@ -27,6 +27,8 @@ DB_PATH = WORK_DIR / "ruru.db"
 HOST = _env("HOST", "0.0.0.0")
 PORT = int(_env("PORT", "5151"))
 MODEL_SIZE = _env("MODEL_SIZE", "auto")
+# Which TTS backend to run: "mlx" (Apple Silicon) or "cuda" (NVIDIA).
+TTS_BACKEND = _env("TTS_BACKEND", "mlx")
 MLX_MODELS_PATH = _env("MLX_MODELS_PATH", str(Path.home() / ".cache/huggingface/hub"))
 AUDIO_FORMAT = _env("AUDIO_FORMAT", "mp3")
 AUDIO_BITRATE = _env("AUDIO_BITRATE", "128k")
