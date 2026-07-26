@@ -81,13 +81,15 @@ sudo bash install_macos.sh
 
 This installs the LaunchAgent at `~/Library/LaunchAgents/com.jeremy.ruru.web.plist` (listening on port 5151) and an nginx site that proxies port 80 → 5151. After that the app is reachable at [http://localhost](http://localhost).
 
+> As on Linux, run the installer from a **dedicated clone** rather than a development checkout — the installer points a service at whatever directory it lives in, and a synced `.venv` will break it.
+
 Manage the running service:
 
 ```bash
 # Restart after a code change (no state wiped)
 launchctl kickstart -k gui/$(id -u)/com.jeremy.ruru.web
 
-# Restart + clear output/uploads/logs (voices are re-seeded on start)
+# Restart + clear output/uploads/logs (voices and the database are preserved)
 ./reset_service.sh restart-only
 ```
 
@@ -237,6 +239,19 @@ uv run pytest
 ```
 
 The suite runs on both platforms and never touches the GPU — model loading is mocked. Tests that need a runtime that isn't installed skip themselves, so the counts differ by machine (a Mac runs the MLX generation tests; a CUDA box skips them, and vice versa).
+
+**A green suite does not prove the engine works.** Because model loading is mocked, the suite stays green against a backend that cannot load a model at all — which is exactly how a silent `mlx-audio` downgrade once shipped unnoticed. After any dependency change, run one real generation before trusting a green run:
+
+```bash
+uv run python -c "
+from engine import get_engine_class
+e = get_engine_class()()
+e.generate_clone('Testing one two three',
+                 'voice_clones/.mp3',
+                 'voice_clones/.txt').write('/tmp/check.mp3')"
+```
+
+`tests/test_engine_contract.py::TestMLXHasQwen3TTSArchitecture` guards the specific regression above by importing the real architecture module — cheap, no GPU — but it can only cover what a static import can see.
 
 Two files hold the dual-backend design together:
 

@@ -151,7 +151,7 @@ engine/
   cuda_engine.py        # CUDAEngine — NVIDIA, via qwen-tts + torch.
   tts.py                # Back-compat shim: re-exports MLXEngine as TTSEngine.
   parsers.py            # parse_document() dispatcher. EPUB (ebooklib+BS4, zipfile fallback) and TXT.
-  chunker.py            # split_into_chunks() — sentence-boundary-aware, default 200 words.
+  chunker.py            # split_into_chunks() — sentence-boundary-aware, default 120 words.
   assembler.py          # assemble_chunks() — trim silence, normalize, concatenate, export.
 templates/              # Jinja2 templates.
   base.html             # Layout with sidebar nav.
@@ -187,7 +187,8 @@ All env vars use the `RURU_` prefix. Defined in `config.py`. Data lives under `W
 | `RURU_MLX_MODELS_PATH` | `~/.cache/huggingface/hub` | Where MLX/HF weights are cached |
 | `RURU_TTS_BACKEND` | `mlx` | `mlx` (Apple Silicon) or `cuda` (NVIDIA) |
 | `RURU_MODEL_SIZE` | `auto` | auto/small/large. On CUDA, anything but `small` means the 1.7B pair |
-| `RURU_CHUNK_SIZE_WORDS` | `200` | Lower = less memory per chunk |
+| `RURU_CHUNK_SIZE_WORDS` | `120` | Lower = less memory per chunk |
+| `RURU_CHUNK_MAX_CHARS` | `700` | Hard character ceiling per chunk |
 | `RURU_MAX_RETRIES` | `3` | Chunk generation retry count |
 | `RURU_CREATOR_TAG` | `Created by ruru` | Audio metadata tag |
 | `RURU__REPO` | parent of repo root | Optional dir containing `characters_data.py`; seeding is skipped if absent |
