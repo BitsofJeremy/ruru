@@ -1,12 +1,22 @@
-# ruru — MLX Version
+# ruru
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-green)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-MLX-black)
+![NVIDIA](https://img.shields.io/badge/NVIDIA-CUDA-76b900)
 
 ---
 
-Audiobook narration engine powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) running locally on Apple Silicon via [MLX](https://github.com/ml-explore/mlx). Upload documents, pick a voice, and generate full audiobooks with on-device text-to-speech.
+Audiobook narration engine powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) running **entirely on your own hardware**. Upload documents, pick a voice, and generate full audiobooks with local text-to-speech.
+
+Two interchangeable GPU backends, selected with `RURU_TTS_BACKEND`:
+
+| Backend | Hardware | Runtime | Weights |
+|---|---|---|---|
+| `mlx` (default) | Apple Silicon | [MLX](https://github.com/ml-explore/mlx) via `mlx-audio` | 8-bit `mlx-community/Qwen3-TTS-12Hz-1.7B-*` |
+| `cuda` | NVIDIA GPU | PyTorch via `qwen-tts` | bf16 `Qwen/Qwen3-TTS-12Hz-1.7B-*` |
+
+Everything above the engine — jobs, database, routes, templates — is shared. Both backends satisfy one interface (`engine/base.py`), enforced by a contract test suite that runs on either platform.
 
 ruru is a single-user web application built with FastAPI and HTMX. It ships with one pre-seeded default voice (), and supports creating new voices via voice cloning or voice design. (-style character-voice bulk seeding is an optional, local-only feature for developers who supply their own `characters_data.py` — it is not part of the public release.)
 
@@ -35,18 +45,31 @@ The name is a nod to ruru, the morepork owl — known for its distinctive two-no
 |---|---|---|
 | Python | >= 3.10 | Tested on 3.12 |
 | [uv](https://docs.astral.sh/uv/) | latest | Package runner — no pip needed |
-| Apple Silicon (M-series) | 16 GB+ unified memory recommended | MLX runs on the Apple GPU; the 1.7B 8-bit models peak around ~7 GB |
-| ffmpeg | any recent | Audio format conversion (pydub) — `brew install ffmpeg` |
-| Nginx | optional | Reverse proxy for production — `brew install nginx` |
+| ffmpeg | any recent | Audio format conversion (pydub) |
+| Nginx | optional | Reverse proxy for production |
+
+Plus **one** of:
+
+| Backend | Requirement | Notes |
+|---|---|---|
+| `mlx` | Apple Silicon (M-series), 16 GB+ unified memory recommended | MLX runs on the Apple GPU; the 1.7B 8-bit models peak around ~7 GB |
+| `cuda` | NVIDIA GPU, ~5 GB free VRAM | Install with `uv sync --extra cuda`. Each bf16 1.7B model is ~4-5 GB; only one is held resident at a time, so a competing GPU workload can still cause an OOM |
 
 ## Quick start
 
 ```bash
+# Apple Silicon
 uv sync
 uv run app.py
+
+# NVIDIA
+uv sync --extra cuda
+RURU_TTS_BACKEND=cuda uv run app.py
 ```
 
-Open [http://localhost:5151](http://localhost:5151) in your browser.
+Open [http://localhost:5151](http://localhost:5151) in your browser. The sidebar shows which backend is active.
+
+> Install the extra that matches your hardware. `--extra cuda` on a Mac would pull in torch and `qwen-tts` needlessly; the MLX packages are already platform-gated to macOS and are skipped elsewhere automatically.
 
 ## Production deployment (macOS)
 
@@ -74,6 +97,30 @@ View logs (written to the data dir, not journald):
 tail -f data/logs/ruru.err
 ```
 
+## Production deployment (Linux / NVIDIA)
+
+Install as a systemd service behind an nginx reverse proxy (idempotent — safe to re-run):
+
+```bash
+sudo bash install_linux.sh
+```
+
+This installs `ruru-web.service` (running as the invoking user, listening on 5151, with `RURU_TTS_BACKEND=cuda`) and an nginx site proxying port 80. `HF_HOME` is set so the service reuses your existing model cache rather than re-downloading ~11 GB.
+
+> Run the installer from a **dedicated clone**, not a development checkout that is synced between machines. A macOS `.venv` landing in a live service directory leaves a dangling interpreter symlink and the unit fails with `203/EXEC`.
+
+Manage the running service:
+
+```bash
+systemctl status ruru-web
+journalctl -u ruru-web -f
+
+# Restart + clear output/uploads (voices and the database are preserved)
+./reset_service.sh restart-only
+```
+
+`reset_service.sh` detects the platform and drives `launchctl` or `systemctl` accordingly.
+
 ## Configuration
 
 All settings are controlled via environment variables with the `RURU_` prefix.
@@ -83,11 +130,14 @@ All settings are controlled via environment variables with the `RURU_` prefix.
 | `RURU_WORK_DIR` | `<repo>/data/` | Root directory for the DB and the `cache/` data tree |
 | `RURU_PORT` | `5151` | Web server port |
 | `RURU_HOST` | `0.0.0.0` | Web server bind address |
+| `RURU_TTS_BACKEND` | `mlx` | TTS backend: `mlx` (Apple Silicon) or `cuda` (NVIDIA) |
 | `RURU_MLX_MODELS_PATH` | `~/.cache/huggingface/hub` | Where the MLX/HF model weights are cached |
-| `RURU_MODEL_SIZE` | `auto` | TTS model size: `auto`, `small`, or `large` |
+| `RURU_MODEL_SIZE` | `auto` | TTS model size: `auto`, `small`, or `large`. On CUDA anything but `small` selects the 1.7B pair |
 | `RURU_AUDIO_FORMAT` | `mp3` | Output audio format |
 | `RURU_AUDIO_BITRATE` | `128k` | Output audio bitrate |
-| `RURU_CHUNK_SIZE_WORDS` | `200` | Words per TTS chunk (lower = less memory per chunk) |
+| `RURU_CHUNK_SIZE_WORDS` | `120` | Words per TTS chunk (lower = less memory per chunk) |
+| `RURU_CHUNK_MAX_CHARS` | `700` | Hard character ceiling per chunk |
+| `RURU_MAX_RETRIES` | `3` | Retries when a chunk comes back the wrong length |
 
 ## Project structure
 
@@ -96,18 +146,25 @@ app.py               # FastAPI app entry point + all routes
 config.py            # Configuration with env var overrides
 pyproject.toml       # Dependencies and uv settings
 install_macos.sh     # Production install: launchd agent + nginx (idempotent)
-reset_service.sh     # Restart / clean / reset-db helper for the launchd service
+install_linux.sh     # Production install: systemd unit + nginx (idempotent)
+reset_service.sh     # Restart / clean / reset-db helper (launchd or systemd)
 voice_clones/        # Default voice reference audio (.mp3 + .txt)
 jobs/
   models.py          # Job state machine (pending/running/completed/failed)
   queue.py           # In-process asyncio job runner
   tasks.py           # TTS generation tasks (generate_tts, narrate_document)
 models/
-  db.py              # SQLite schema (voices, jobs, chapters)
+  db.py              # SQLAlchemy models + schema (voices, jobs, chapters)
   seed_voices.py     # Optional  character voice seeding (local-only)
   scan_voice_clones.py # Seeds the default  voice from voice_clones/ on startup
+  import_voices.py   # Migrate a voice library from another install
 engine/
-  tts.py             # TTSEngine — model lifecycle and generation
+  __init__.py        # get_engine_class() — backend factory (RURU_TTS_BACKEND)
+  base.py            # TTSEngineBase — the interface both backends implement
+  result.py          # TTSResult — tuple-unpackable as (wav, sr), plus .write()
+  mlx_engine.py      # MLXEngine — Apple Silicon, via mlx-audio
+  cuda_engine.py     # CUDAEngine — NVIDIA, via qwen-tts + torch
+  tts.py             # Back-compat shim re-exporting MLXEngine as TTSEngine
   parsers.py         # EPUB and TXT document parsing
   chunker.py         # Sentence-boundary-aware text splitting
   assembler.py       # Audio concatenation and silence trimming
@@ -140,11 +197,13 @@ Browser (HTMX) ──> FastAPI (port 5151) ──> SQLite (jobs, voices)
                         │
                         └── Static files (voices, output audio)
                                │
-                          Qwen3-TTS models (MLX, Apple Silicon GPU)
+                          Qwen3-TTS models
+                          (MLX / Apple GPU  or  PyTorch / NVIDIA CUDA)
 ```
 
 - **FastAPI** serves pages and API endpoints. Templates are rendered server-side with Jinja2. HTMX handles interactivity (form submission, progress polling) without a JavaScript framework.
-- **asyncio job runner** manages the job queue in-process. Jobs run sequentially on the Apple GPU (concurrency=1 by design). Progress is written to SQLite so the web UI can poll for status.
+- **asyncio job runner** manages the job queue in-process. Jobs run sequentially on the GPU (concurrency=1 by design). Progress is written to SQLite so the web UI can poll for status.
+- **Backend factory** — application code never imports an engine class directly; `get_engine_class()` resolves `RURU_TTS_BACKEND` and imports the concrete class lazily, so a Mac never imports `torch` and an NVIDIA box never imports `mlx`.
 - **Qwen3-TTS** provides two generation modes:
   - **Voice clone** — reproduce a voice from a reference audio clip + transcript
   - **Voice design** — create a voice from a text description alone
@@ -171,12 +230,27 @@ Upload a short audio clip (5-30 seconds) of clear speech along with its transcri
 | EPUB | ebooklib + BeautifulSoup4 | Chapter detection from spine order |
 | TXT | Built-in | Chapters split on blank-line-separated headings |
 
+## Testing
+
+```bash
+uv run pytest
+```
+
+The suite runs on both platforms and never touches the GPU — model loading is mocked. Tests that need a runtime that isn't installed skip themselves, so the counts differ by machine (a Mac runs the MLX generation tests; a CUDA box skips them, and vice versa).
+
+Two files hold the dual-backend design together:
+
+- `tests/test_engine_contract.py` — checks every backend class against the shared interface: method presence and signatures, `is_loaded` genuinely being a property, synchronous methods, and that both generators return something that is **both** tuple-unpackable and `.write()`-able. That last one matters: returning a bare `(wav, sr)` tuple satisfies the unpacking call sites and then fails at `result.write(...)`.
+- `tests/test_engine_factory.py` — backend selection, plus assertions that choosing one backend never imports the other's dependencies.
+
+Together they mean a backend developed on one machine can be trusted to drop into the other's call sites.
+
 ## Tech stack
 
 - **[FastAPI](https://fastapi.tiangolo.com/)** — async web framework
 - **[HTMX](https://htmx.org/)** — server-driven interactivity
 - **[Tailwind CSS](https://tailwindcss.com/)** — utility-first styling (CDN)
-- **[aiosqlite](https://github.com/omnilib/aiosqlite)** — async SQLite
+- **[SQLAlchemy](https://www.sqlalchemy.org/) + [aiosqlite](https://github.com/omnilib/aiosqlite)** — ORM and async SQLite
 - **[Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS)** — text-to-speech models
 - **[pydub](https://github.com/jiaaro/pydub)** — audio processing
 - **[uv](https://docs.astral.sh/uv/)** — Python package management
