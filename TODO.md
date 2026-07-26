@@ -16,6 +16,34 @@ gets pulled and verified there before merging to `main`. Linux production is a
 
 ---
 
+## STATUS as of 2026-07-26 (later same day) — Mac done, read this first
+
+The Mac work below ("What's left — pick up here on the Mac") is now **done**.
+Summary, evidence inline further down:
+
+- Fixed the real bug found this session: `qwen-tts`'s `transformers==4.57.3`
+  pin was silently backtracking `mlx-audio` to 0.2.10 on the Mac via uv's
+  universal lock (see the "PLAIN uv sync" correction below). Fixed with
+  conflicting `mlx`/`cuda` extras in `pyproject.toml` (commit `a8ea1cf`,
+  pushed to `main`).
+- Dev checkout (`~/Documents/current_projects/ai_speech/ruru`): `uv lock &&
+  uv sync --extra mlx` → mlx-audio 0.4.6. `uv run pytest` → 175 passed, 6
+  skipped. Real (non-mocked) `generate_clone` produced a valid MP3.
+  `HF_HUB_OFFLINE=1` load succeeded — MLX does not have the CUDA offline
+  bug (see §5 below, answered).
+- Production clone (`/Users/jeremy/bin/ruru`): pulled to `a8ea1cf`, `uv sync
+  --extra mlx` (resolved mlx-audio 0.4.4, clears the >=0.4.4 floor), `uv run
+  pytest` → 175/6/0 (see the `test_voice_seed.py` note below — this clone has
+  a local `characters_data.py` that made two tests fail until temporarily
+  moved aside to prove root cause, then restored). Real generation check
+  passed. `./reset_service.sh restart-only`: old PID 97249 → new PID, port
+  5151 re-bound, HTTP 200, 13 voices / all reference audio intact (one
+  disposable `*_preview.*` file cleared by design, not a data loss).
+- New regression test in `tests/test_engine_contract.py` —
+  `TestMLXHasQwen3TTSArchitecture` — guards against this exact silent
+  downgrade recurring; proven to fail against a real 0.2.10 install.
+- Not done: §6 CI (optional, not attempted this session).
+
 ## STATUS as of 2026-07-26 — read this first
 
 Merged to `main`. Phases 0 through 3 are **done and running in
@@ -550,3 +578,16 @@ Standing rules for every round trip:
 - `.venv` directories are checked into the Syncthing-synced tree, so a macOS
   venv lands on Linux and vice versa. This is what broke `sprecher-web.service`
   (`203/EXEC`). Make sure `.venv/` is gitignored *and* excluded from Syncthing.
+- `tests/test_voice_seed.py::TestSeedVoices::test_seed_is_noop_without_characters_data`
+  and `::test_seed_idempotent_when_noop` assume `characters_data.py` is absent
+  (the public-repo case). They fail in **any checkout that has a real, local,
+  gitignored `characters_data.py`** — found 2026-07-26 in the Mac production
+  clone (`/Users/jeremy/bin/ruru`), which keeps one on purpose for Ephergent
+  seeding. Root cause: `models/seed_voices.py:20` does
+  `sys.path.insert(0, repo_root)` and imports `characters_data` at module load
+  time, so the "no-op" tests are only actually testing the no-op path when the
+  file happens to be absent from that specific machine. Fix by isolating
+  `sys.path`/`sys.modules` per test (like the third test in that file already
+  does with `monkeypatch.setitem`) or by skipping those two tests outright
+  when `find_spec("characters_data")` is not `None`. Out of scope for the
+  dual-backend work; recording so it doesn't get re-diagnosed from scratch.
