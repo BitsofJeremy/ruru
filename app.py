@@ -86,6 +86,14 @@ template_dir = _REPO_ROOT / "templates"
 env = Environment(loader=FileSystemLoader(template_dir), autoescape=True)
 env.filters['basename'] = lambda p: Path(p).name
 
+# Globals, so every template gets these without each route passing them. base.html
+# renders both in the sidebar; app_version used to come out blank because no route
+# supplied it.
+from engine import get_backend_label
+
+env.globals['app_version'] = APP_VERSION
+env.globals['backend_label'] = get_backend_label()
+
 def render(template_name, **context):
     return env.get_template(template_name).render(**context)
 
