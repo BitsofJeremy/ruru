@@ -79,7 +79,11 @@ fi
 # 2. Retire the old sprecher service (ruru is its successor)
 # ---------------------------------------------------------------------------
 c "🧹 1/7  Retiring the old sprecher service (if present)..."
-if systemctl list-unit-files 2>/dev/null | grep -q '^sprecher-web\.service'; then
+# NB: capture first, then grep. Piping into `grep -q` under `set -o pipefail`
+# reports failure even on a match: grep exits at the first hit, systemctl dies
+# of SIGPIPE (141), and pipefail propagates that as the pipeline's status.
+UNIT_FILES="$(systemctl list-unit-files --no-pager --plain 2>/dev/null || true)"
+if grep -q '^sprecher-web\.service' <<<"$UNIT_FILES"; then
     systemctl disable --now sprecher-web 2>/dev/null || true
     rm -f /etc/systemd/system/sprecher-web.service
     systemctl daemon-reload
