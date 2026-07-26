@@ -103,6 +103,29 @@ class CUDAEngine(TTSEngineBase):
         except Exception as e:  # pragma: no cover - diagnostics only
             logger.debug(f"  Could not read VRAM info: {e}")
 
+    @staticmethod
+    def _resolve_model_path(model_id: str) -> str:
+        """Resolve *model_id* to a local snapshot directory when it's cached.
+
+        `qwen_tts.from_pretrained` is a thin wrapper over
+        `AutoModel.from_pretrained(repo_id)`, which contacts huggingface.co on
+        every load — so a network outage takes TTS down even though the weights
+        are already on disk. Passing a filesystem path instead never touches
+        the network.
+
+        Falls back to the bare repo id when the model isn't cached yet, so a
+        first-time download still works.
+        """
+        try:
+            from huggingface_hub import snapshot_download
+
+            path = snapshot_download(model_id, local_files_only=True)
+            logger.info(f"  Using cached snapshot: {path}")
+            return path
+        except Exception as e:
+            logger.info(f"  No local snapshot for {model_id} ({e}); will fetch.")
+            return model_id
+
     def _from_pretrained(self, model_id: str):
         torch = self._require_cuda()
         from qwen_tts import Qwen3TTSModel
@@ -110,7 +133,7 @@ class CUDAEngine(TTSEngineBase):
         self._log_free_vram(torch)
         logger.info(f"  Loading model: {model_id}")
         model = Qwen3TTSModel.from_pretrained(
-            model_id, device_map=DEVICE, dtype=torch.bfloat16,
+            self._resolve_model_path(model_id), device_map=DEVICE, dtype=torch.bfloat16,
         )
         logger.info("  Model loaded successfully")
         return model
