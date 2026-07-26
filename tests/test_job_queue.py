@@ -25,11 +25,15 @@ class TestJobRunner:
     def test_enqueue_returns_future(self):
         runner = JobRunner()
         runner.start()
+        # The background thread may dequeue this before stop(). Stub the handler
+        # so it never reaches the real one, which needs a configured DB path and
+        # would otherwise make this test depend on run order.
         try:
-            future = asyncio.get_event_loop().run_until_complete(
-                runner.enqueue(1, JobType.GENERATE_TTS, {"text": "hello"})
-            )
-            assert isinstance(future, asyncio.Future)
+            with patch("jobs.tasks.run_generate_tts", MagicMock(return_value={})):
+                future = asyncio.run(
+                    runner.enqueue(1, JobType.GENERATE_TTS, {"text": "hello"})
+                )
+                assert isinstance(future, asyncio.Future)
         finally:
             runner.stop()
 
