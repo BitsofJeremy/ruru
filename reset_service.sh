@@ -40,6 +40,21 @@ log_info() { echo -e "${GREEN}ℹ $*${NC}"; }
 log_warn() { echo -e "${YELLOW}⚠ $*${NC}"; }
 log_error() { echo -e "${RED}✗ $*${NC}"; }
 
+# Fail before touching anything if we can't drive systemd. Otherwise a command
+# like restart-only stops the service and clears state, then discovers at the
+# last step that it can't start it again — leaving the site down behind a 502.
+require_sudo() {
+    [[ "$PLATFORM" == "linux" ]] || return 0
+    [[ $EUID -eq 0 ]] && return 0
+    if ! sudo -n true 2>/dev/null; then
+        log_error "This needs sudo to control ${SERVICE_NAME}.service, and no"
+        log_error "cached credentials are available (or there's no terminal to"
+        log_error "prompt on). Run it from an interactive shell, or pre-authorise"
+        log_error "with:  sudo -v"
+        exit 1
+    fi
+}
+
 usage() {
     cat << EOF
 ruru Service Control Script  (detected platform: $PLATFORM)
@@ -165,16 +180,19 @@ reset_database() {
 
 case "${1:-help}" in
     clean-only)
+        require_sudo
         stop_service
         clear_state
         ;;
     reset-db|clean-all)
+        require_sudo
         stop_service
         clear_state
         reset_database
         start_service
         ;;
     restart-only)
+        require_sudo
         stop_service
         clear_state
         start_service
