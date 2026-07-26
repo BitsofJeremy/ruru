@@ -64,14 +64,19 @@ EOF
 stop_service() {
     log_info "Stopping ruru service..."
     if [[ "$PLATFORM" == "linux" ]]; then
-        if systemctl list-unit-files 2>/dev/null | grep -q "^${SERVICE_NAME}\.service"; then
+        # Capture first, then grep — piping into `grep -q` under `set -o pipefail`
+        # reports failure even on a match (SIGPIPE kills the producer, 141).
+        unit_files="$(systemctl list-unit-files --no-pager --plain 2>/dev/null || true)"
+        if grep -q "^${SERVICE_NAME}\.service" <<<"$unit_files"; then
             sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
             sleep 1
         else
             log_warn "No ${SERVICE_NAME}.service installed — run install_linux.sh first"
         fi
     elif [[ "$PLATFORM" == "macos" ]]; then
-        if launchctl list | grep -q "com.jeremy.ruru.web"; then
+        # Same pipefail/SIGPIPE hazard as the Linux branch above.
+        agents="$(launchctl list 2>/dev/null || true)"
+        if grep -q "com.jeremy.ruru.web" <<<"$agents"; then
             launchctl unload "$LAUNCH_AGENT" 2>/dev/null || true
             sleep 1
         fi
