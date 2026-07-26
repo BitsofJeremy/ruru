@@ -69,15 +69,15 @@ chown -R "$REAL_USER:$REAL_GROUP" "$WORK_DIR"
 # ---------------------------------------------------------------------------
 # 3. Python environment (uv sync) — as real user so .venv stays user-owned
 # ---------------------------------------------------------------------------
-c "🐍 2/6  Syncing Python dependencies (uv sync)..."
+c "🐍 2/6  Syncing Python dependencies (uv sync --extra mlx)..."
 if [[ -x "$UV_BIN" ]]; then
-    as_user "$UV_BIN" sync --project "$APP_DIR"
+    as_user "$UV_BIN" sync --project "$APP_DIR" --extra mlx
 else
     err "   uv not found ($UV_BIN) — skipping sync. Ensure the venv already exists."
 fi
 if [[ ! -x "$VENV_BIN" ]]; then
     err "❌ Missing executable: $VENV_BIN"
-    echo "   Run as $REAL_USER:  cd \"$APP_DIR\" && uv sync"
+    echo "   Run as $REAL_USER:  cd \"$APP_DIR\" && uv sync --extra mlx"
     exit 1
 fi
 

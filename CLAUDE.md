@@ -6,11 +6,66 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ruru is a single-user web application for audiobook narration and voice management, powered by Qwen3-TTS running locally on Apple Silicon via MLX (`mlx-audio`). Single FastAPI process with in-process asyncio job runner handles all TTS work — no Celery, no Redis, no separate worker process. (This MLX/Apple Silicon implementation is distinct from the earlier NVIDIA/CUDA-based implementation in `reference_material/`.)
 
+## Development vs Production — four separate checkouts
+
+**You are almost certainly in a dev checkout. Production runs somewhere else.**
+Each machine keeps development and production in *different directories*, with
+their own `.venv` and their own `RURU_WORK_DIR`. Nothing you do in a dev
+checkout reaches a running service until you deliberately update the
+production clone.
+
+| | Development | Production |
+|---|---|---|
+| **macOS (MLX)** | `~/Documents/current_projects/ai_speech/ruru` — Syncthing-synced | `~/bin/ruru` — launchd agent `com.jeremy.ruru.web`, port 5151 |
+| **Linux (CUDA)** | a plain `git clone` — Syncthing-synced | `/8TB/bin/ruru` — `ruru-web.service` + nginx at `ruru.nexus.home.test` |
+
+Why it's arranged this way:
+
+- **The dev checkouts are Syncthing-synced between the Mac and the Linux box.**
+  A macOS `.venv` landing in a live service directory leaves a dangling
+  interpreter symlink — that is exactly how `sprecher-web.service` ended up
+  crash-looping with `203/EXEC`. Production clones are deliberately outside the
+  synced tree so this cannot happen.
+- **The production clones lag on purpose.** They only move when someone pulls
+  and verifies. A production clone sitting several commits behind `main` is a
+  normal state, not a mistake to "fix" on sight.
+
+### The working rule
+
+Verify in dev, then update production, and restart the service **last**:
+
+1. Make and verify the change in the dev checkout — `uv run pytest`, plus a
+   **real** model load and narrate job. The suite mocks the engine, so a green
+   run alone proves nothing about TTS actually working.
+2. Commit and push from dev.
+3. In the production clone: `git pull`, then `uv sync --extra mlx` (macOS) or
+   `uv sync --extra cuda` (Linux), then re-run the suite and one real
+   generation **before** touching the service.
+4. Only then `./reset_service.sh restart-only`. Confirm the old PID is gone, a
+   new process holds 5151, and the site answers.
+
+Both platforms must stay green — a Mac-only or Linux-only change is a
+regression for the other. See "Testing" for the two files that enforce this.
+
+### Don't collide with the running service
+
+A dev checkout defaults to the same port and a sibling data dir as production.
+When running the app from dev on a machine where production is live, override
+both:
+
+```bash
+RURU_PORT=5252 RURU_WORK_DIR=/tmp/ruru_test uv run ruru
+```
+
+Never run `install_macos.sh` / `install_linux.sh` from a dev checkout — they
+install a service pointing at whatever directory they live in.
+
 ## Running the App
 
 ```bash
-# Install dependencies
-uv sync
+# Install dependencies (pick the extra matching your hardware)
+uv sync --extra mlx     # Apple Silicon
+uv sync --extra cuda    # NVIDIA/Linux
 
 # Run (single process, no worker needed)
 uv run ruru
@@ -61,7 +116,7 @@ Jobs persist in SQLite with status (queued/running/completed/failed). A backgrou
 
 ## Key Architectural Details
 
-**pyproject.toml.** All dependencies declared in `pyproject.toml`. The package is the repo root itself (`[tool.hatch.build.targets.wheel] packages = ["."]`). Console script `ruru` maps to `app:main` (top-level `app.py`, not a `ruru` package). Use `uv sync` to install.
+**pyproject.toml.** All dependencies declared in `pyproject.toml`. The package is the repo root itself (`[tool.hatch.build.targets.wheel] packages = ["."]`). Console script `ruru` maps to `app:main` (top-level `app.py`, not a `ruru` package). Use `uv sync --extra mlx` (Apple Silicon) or `uv sync --extra cuda` (NVIDIA) to install — plain `uv sync` installs neither backend. The `mlx` and `cuda` extras are declared mutually exclusive via `[tool.uv] conflicts` so `uv lock` forks the resolution per backend instead of intersecting it: `qwen-tts==0.1.1` (pulled in by `cuda`) hard-pins `transformers==4.57.3`, and without the conflict declaration a single universal lock would force that pin onto the Mac too, silently backtracking `mlx-audio` to 0.2.10 — the last release before `mlx_audio/tts/models/qwen3_tts/` existed, which breaks Qwen3-TTS loading with no error at install time. Do not "simplify" the extras back into unconditional dependencies.
 
 **StaticFiles directory validation.** `StaticFiles(directory=...)` validates the directory exists at mount time. Directories are created at module level BEFORE `app = FastAPI(...)`. This was a real bug — do not move directory creation into the lifespan handler only.
 
@@ -144,11 +199,14 @@ Note: there is no Redis/Celery anywhere — the job runner is fully in-process (
 ## Installation (Production — macOS)
 
 ```bash
+# In the DEDICATED production clone at ~/bin/ruru, not the Syncthing-synced
+# dev checkout under ~/Documents:
+cd ~/bin/ruru
 # Install dependencies + launchd user agent + nginx reverse proxy (idempotent)
 sudo bash install_macos.sh
 ```
 
-`install_macos.sh` is sudo-safe: it derives paths from the script location (never `$HOME`), re-runs user-level steps (`uv sync`, DB init, the launchd *user* agent) as `SUDO_USER`, and only uses root for nginx on port 80. The launchd agent lands in `~/Library/LaunchAgents/com.jeremy.ruru.web.plist`.
+`install_macos.sh` is sudo-safe: it derives paths from the script location (never `$HOME`), re-runs user-level steps (`uv sync --extra mlx`, DB init, the launchd *user* agent) as `SUDO_USER`, and only uses root for nginx on port 80. The launchd agent lands in `~/Library/LaunchAgents/com.jeremy.ruru.web.plist`.
 
 Use `reset_service.sh` to manage the running service: `restart-only`, `clean-only`, `reset-db`, `clean-all` (see `reset_service.sh help`). It detects the platform and drives `launchctl` or `systemctl` accordingly. On macOS, logs go to `data/logs/ruru.{log,err}`.
 

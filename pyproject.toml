@@ -11,8 +11,6 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "python-multipart>=0.0.6",
     "numpy>=1.24.0",
-    "mlx ; sys_platform == 'darwin'",
-    "mlx-audio ; sys_platform == 'darwin'",
     "soundfile>=0.12.0",
     "pydub>=0.25.0",
     "ebooklib>=0.18",
@@ -23,7 +21,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mlx  = ["mlx ; sys_platform == 'darwin'",
+        "mlx-audio>=0.4.4 ; sys_platform == 'darwin'"]
 cuda = ["torch>=2.0.0", "qwen-tts"]
+
+[tool.uv]
+conflicts = [[{ extra = "mlx" }, { extra = "cuda" }]]
 
 [project.scripts]
 ruru = "app:main"
