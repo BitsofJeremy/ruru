@@ -18,16 +18,51 @@ gets pulled and verified there before merging to `main`. Linux production is a
 
 ## STATUS as of 2026-07-26 — read this first
 
-Branch `cuda-backend`. Phases 0 through 3 are **written and verified on Linux**.
-The checkboxes below are ticked accordingly. What is *not* done:
+Branch `cuda-backend`, pushed. Phases 0 through 3 are **done and running in
+production on Linux**. `http://ruru.nexus.home.test/` serves ruru on the CUDA
+backend from `/8TB/bin/ruru`, via `ruru-web.service` behind nginx.
+
+**All that remains is the Mac side:**
 
 | Remaining work | Owner |
 |---|---|
-| Run `sudo bash install_linux.sh` in a fresh clone at `/8TB/bin/ruru` | archie |
-| Confirm the installed service serves `http://ruru.nexus.home.test/` and runs a narrate job (the engine path itself is already proven — see below) | archie |
-| Pull `cuda-backend` on the Mac: `uv sync` (**no** `--extra cuda`) → `uv run pytest` → MLX narrate smoke test | archie, on the Mac |
+| Pull `cuda-backend` on the Mac: `uv sync` (**plain — never** `--extra cuda`) → `uv run pytest` → a real MLX narrate smoke test | archie, on the Mac |
 | Merge to `main`, restart the launchd agent last | archie |
 | Optional GitHub Actions `ubuntu-latest` job (Phase 4) | archie |
+
+### Production install, verified 2026-07-26
+
+- `ruru-web.service` **active and enabled** (starts on boot), running
+  `/8TB/bin/ruru/.venv/bin/ruru` as `jeremy` on port 5151.
+- `http://ruru.nexus.home.test/` returns the ruru Dashboard; `/voices`,
+  `/narrate`, `/static/`, and `/api/voices` all 200. The  voice
+  auto-seeded from `voice_clones/`.
+- **Full narrate job through nginx**: 331-word document → 4 chunks → a 101.60 s
+  MP3, normalized to max −3.4 dBFS, downloadable through the
+  `/audio/output/` alias (1.6 MB, `audio/mpeg`). Zero errors in the journal.
+- `./reset_service.sh restart-only` stops, clears state, and restarts cleanly;
+  the seeded voice survives.
+- **sprecher fully retired**: unit file deleted, no sprecher units remain, both
+  nginx configs gone. Its ~35,000-restart crash loop is over. Repo files on
+  disk untouched.
+- The production clone is a **separate checkout** at `/8TB/bin/ruru` with its
+  own Python 3.13.2 venv — not the Syncthing-synced dev tree. Its test suite
+  passes there too (167 passed, 4 skipped).
+
+### Two bugs found and fixed during the install
+
+1. **`pipefail` + `grep -q`** (commit `44de990`). `systemctl list-unit-files |
+   grep -q ...` returns 141, not 0, on a match: grep exits at the first hit,
+   the producer dies of SIGPIPE, and `pipefail` propagates that. The installer
+   therefore reported "no sprecher-web.service — nothing to do" while the unit
+   was live and crash-looping. The same pattern was in both of
+   `reset_service.sh`'s `stop_service` branches — the `launchctl` one would
+   have made **every macOS restart silently skip unloading the agent**, leaving
+   the old process holding port 5151. Capture to a variable, then grep it.
+2. **`reset_service.sh` checked for sudo too late** (commit `a686573`). It
+   stopped the service and cleared state before discovering it couldn't
+   authenticate to start it again, leaving nginx serving 502s. Now verified up
+   front, before anything destructive.
 
 Evidence already collected on Linux, with **ComfyUI stopped** and the **1.7B**
 models (`RURU_MODEL_SIZE=large`), i.e. the real production configuration:
@@ -58,10 +93,9 @@ models (`RURU_MODEL_SIZE=large`), i.e. the real production configuration:
 reloads per job — about 15-20 s of startup before the first chunk. Pre-existing
 MLX behaviour; worth revisiting separately if narration throughput matters.
 
-`install_linux.sh` and `reset_service.sh` are syntax-checked but **have not
-been executed**; running the installer is deliberately left to archie so the
-system changes (systemd unit, nginx vhost, sprecher removal) happen once, in
-the production clone, under review.
+`install_linux.sh` has been run twice against `/8TB/bin/ruru` and is confirmed
+idempotent: the second run retired sprecher and left the healthy ruru service
+undisturbed.
 
 ---
 
@@ -133,7 +167,7 @@ method-scoped (`_load_clone` :130-137, `_load_design` :139-146, `_run_generate`
 :188-208). Module level needs only `numpy` + `soundfile`, so the whole suite
 imports on a machine with no MLX.
 
-### Phase 0.5 — Green pytest baseline on Linux
+### Phase 0.5 — Green pytest baseline on Linux — ✅ DONE
 
 `uv run pytest` on the Linux box is **3 failed, 116 passed, 1 skipped** today.
 Fix this first, so later failures mean something.
@@ -149,7 +183,7 @@ Fix this first, so later failures mean something.
       handler (or `set_db_path` to a tmp DB) instead of depending on test order.
 - [x] Verify: `uv run pytest` fully green on **both** Linux and the Mac.
 
-### Phase 1 — Backend-agnostic refactor
+### Phase 1 — Backend-agnostic refactor — ✅ DONE (Linux; Mac verification pending)
 
 MLX stays the only backend. Pure interface extraction, no behaviour change. Use
 TDD (`superpowers:test-driven-development`). Merge to `main` before Phase 2.
@@ -213,7 +247,7 @@ TDD (`superpowers:test-driven-development`). Merge to `main` before Phase 2.
       the UI, then restart the launchd agent. Merge to `main` only after that.
       (Kill any manually started `uv run ruru` first — known port conflict.)
 
-### Phase 2 — `CUDAEngine` on the Linux clone
+### Phase 2 — `CUDAEngine` on the Linux clone — ✅ DONE
 
 ```bash
 uv sync --extra cuda
@@ -248,7 +282,7 @@ uv run pytest            # must be green before writing anything
 - [x] Verify on Linux: contract suite green for `CUDAEngine`; then stop ComfyUI,
       `RURU_TTS_BACKEND=cuda uv run ruru`, and run a real narrate job end to end.
 
-### Phase 3 — Linux production install at `/8TB/bin/ruru`
+### Phase 3 — Linux production install at `/8TB/bin/ruru` — ✅ DONE
 
 New `install_linux.sh` at the repo root. Model it on `install_macos.sh` — the
 more complete script; it does `uv sync`, DB init, and derives every path from
