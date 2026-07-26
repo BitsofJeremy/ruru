@@ -86,7 +86,45 @@ Confirm the agent really does stop and restart, and that the site comes back.
 
 Kill any manually started `uv run ruru` first.
 
-### 5. Optional, cheap, worth it
+### 5. Check whether MLX has the same offline bug — likely, untested
+
+On Linux, `qwen_tts` wraps `AutoModel.from_pretrained(repo_id)`, which contacts
+huggingface.co on **every** model load. A network outage therefore took TTS down
+even though all ~11 GB of weights were cached on disk. Fixed for CUDA in commit
+`c22cb74` by resolving the repo id to its local snapshot directory first — a
+filesystem path never touches the network — with a fallback to the bare repo id
+so first-time downloads still work. See `CUDAEngine._resolve_model_path`.
+
+**The MLX engine very likely has the same problem and has not been tested.**
+`MLXEngine._load_clone`/`_load_design` call
+`mlx_audio.tts.utils.load_model(CLONE_MODEL_ID)` with a bare
+`mlx-community/...` repo id (`engine/mlx_engine.py`), which is the same shape of
+call. It was left alone deliberately: it can't be tested off Apple Silicon, and
+blind-patching the Mac's production load path is exactly the kind of change this
+whole branch structure exists to prevent.
+
+To check it on the Mac:
+
+```bash
+HF_HUB_OFFLINE=1 uv run python -c "
+from engine import get_engine_class
+e = get_engine_class('mlx')()
+e._load_clone()
+print('offline load OK')"
+```
+
+- **If it raises** (expect `OfflineModeIsEnabled`), mirror the CUDA fix: add the
+  same `_resolve_model_path` helper — ideally lifted to `engine/base.py` so both
+  backends share one implementation — and pass the resolved path to
+  `load_model`. Then re-run the command above to confirm, and add a test beside
+  `TestCUDAOfflineModelResolution` in `tests/test_engine_contract.py`.
+- **If it loads fine**, mlx-audio already falls back to cache. Note that here so
+  nobody re-investigates.
+
+Either way this is worth doing: ruru is a local-first app, and "no internet"
+should never mean "no speech".
+
+### 6. Optional, cheap, worth it
 
 A GitHub Actions job running `uv sync && uv run pytest` on `ubuntu-latest`. It
 won't catch MLX runtime regressions, but it catches every "this only imports on
@@ -95,10 +133,42 @@ built to prevent.
 
 ### If the Mac goes wrong
 
-`main` is four commits ahead of where it was. Last known-good commit before
-this work: **`60be0c8`**. The Linux production install at `/8TB/bin/ruru` is
+`main` is ~10 commits ahead of where it was. Last known-good commit before this
+work: **`60be0c8`**. The Linux production install at `/8TB/bin/ruru` is
 independent — it tracks its own checkout and won't be affected by anything you
 do to the Mac or to `main`.
+
+### Also landed after the merge — the Mac will pull these too
+
+Three fixes and a tool, all found while running the Linux install. None are
+CUDA-specific, so they affect the Mac as well:
+
+- **`c22cb74`** — cached weights load without contacting huggingface.co
+  (CUDA only so far; see step 5 above).
+- **`ad10040`** — **`reset_service.sh` was deleting the voice library.**
+  `clear_state()` removed `*_ref.wav` and `*_sample.wav`, but `app.py:424`
+  saves uploaded clone reference audio as `{slug}_ref{suffix}` — so every
+  `restart-only` destroyed uploaded voices and left DB rows pointing at missing
+  files. Only `{slug}_preview.*` (`app.py:567`) is disposable. **If the Mac's
+  voice library has been losing entries, this is why.**
+- **`a686573`** — `reset_service.sh` checks for sudo before doing anything
+  destructive (Linux path only; harmless on macOS).
+- **`models/import_voices.py`** — migrates a voice library between installs,
+  rewriting the per-machine paths and writing transcripts to disk. Used to move
+  the 10  characters + Ray Porter + Neil Hellegers onto the Linux box;
+  the same command works in reverse if the Mac needs them.
+
+### Linux voice library, as of 2026-07-26
+
+13 voices live at `http://ruru.nexus.home.test/`: the 10  characters
+(``) plus , Ray_Porter, and Neil_Hellegers (`cloned`). Every
+`ref_audio_path` and `ref_text` resolves to a local file. Generation confirmed
+with Meatball and Clive Stapler. A pre-import DB backup sits at
+`data/ruru.db.bak-preimport`.
+
+Note the transcripts: several  `ref_text` values existed **only** in
+the old dev database, not on disk. `import_voices.py` writes them out as
+`{slug}_ref.txt`, so they now survive a database reset.
 
 ---
 
