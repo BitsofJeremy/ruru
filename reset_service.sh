@@ -146,9 +146,13 @@ clear_state() {
     rm -rf "${CHUNK_DIR:?}"/* 2>/dev/null || true
     log_info "  - Cleared chunk scratch files"
 
-    find "$VOICE_DIR" -name "*_sample.wav" -delete 2>/dev/null || true
-    find "$VOICE_DIR" -name "*_ref.wav" -delete 2>/dev/null || true
-    log_info "  - Cleared voice samples"
+    # ONLY generated previews. `{slug}_ref.*` and `{slug}_sample.*` are the
+    # permanent reference audio for a registered voice — app.py:424 writes
+    # uploaded clone audio as `{slug}_ref{suffix}`. Deleting those (as this
+    # did) destroys the voice library and leaves DB rows pointing at missing
+    # files. Only `{slug}_preview.*` (app.py:567) is disposable.
+    find "$VOICE_DIR" -name "*_preview.*" -delete 2>/dev/null || true
+    log_info "  - Cleared generated voice previews (reference audio kept)"
 
     rm -rf "${UPLOADS_DIR:?}"/* 2>/dev/null || true
     log_info "  - Cleared uploads"
