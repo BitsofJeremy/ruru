@@ -1,151 +1,434 @@
 # TODO
 
-## Dual-backend (MLX + CUDA) support
+## Dual-backend (MLX + CUDA) support and Linux production install
 
 Implements the recommendation in `docs/nvidia_feasibility.md`: one repo, an
-abstract `engine/base.py`, `MLXEngine`/`CUDAEngine` subclasses, backend chosen
-by `RURU_TTS_BACKEND`. Nothing below is implemented yet.
+abstract `engine/base.py`, `MLXEngine`/`CUDAEngine` subclasses, backend chosen by
+`RURU_TTS_BACKEND` — plus the Linux production install that makes ruru the
+successor to the retired WeirDing and sprecher services.
 
-**Development setup:** CUDA work happens on the NVIDIA Linux desktop (a plain
-`git clone` of this repo — the only box that can run CUDA inference). This Mac
-is the production install (launchd + nginx) and must never break, so every
-Linux branch gets pulled and verified here before merging to `main`.
-
-### Corrections to `docs/nvidia_feasibility.md`
-
-- §3's `reference_material/` and `archive/private_removed_20260725/` paths do
-  not exist. The live CUDA references are `../WeirDing/engine/tts.py` (sync,
-  the direct ancestor) and `../sprecher/core/tts/qwen_engine.py` (the async
-  ABC variant).
-- §1's `jobs/tasks.py` line numbers are stale. Actual engine call sites:
-  `jobs/tasks.py:61-63`, `115-120`, `215-217`.
+**Development setup.** CUDA work happens on the NVIDIA Linux desktop (a plain
+`git clone` of this repo). That clone is **dev only** — it is Syncthing-synced
+with the MacBook and must never be a service directory. The Mac is the MLX
+production install (launchd + nginx) and must never break, so every Linux branch
+gets pulled and verified there before merging to `main`. Linux production is a
+*separate* clone at `/8TB/bin/ruru` (Phase 3).
 
 ---
 
-### Phase 0 — Make the repo installable on Linux (on the Mac)
+## STATUS as of 2026-07-26 — read this first
 
-Without this, `uv sync` fails on Linux before any code runs.
+Merged to `main`. Phases 0 through 3 are **done and running in
+production on Linux**. `http://ruru.nexus.home.test/` serves ruru on the CUDA
+backend from `/8TB/bin/ruru`, via `ruru-web.service` behind nginx.
 
-- [ ] `pyproject.toml`: add platform markers so Apple-only wheels are skipped
-      elsewhere:
-      ```toml
-      "mlx ; sys_platform == 'darwin'",
-      "mlx-audio ; sys_platform == 'darwin'",
-      ```
-- [ ] `pyproject.toml`: add the CUDA extra, copied from
-      `../WeirDing/pyproject.toml:12-13`:
-      ```toml
-      [project.optional-dependencies]
-      cuda = ["torch>=2.0.0", "qwen-tts"]
-      ```
-- [ ] Leave `uv.lock` gitignored (`.gitignore`, "uv" block). Each machine
-      resolves its own — this removes cross-platform lock churn entirely. Do
-      not start committing it.
-- [ ] Verify: `uv run pytest` green on the Mac, then merge to `main`.
+---
 
-Why this is safe: every MLX import in `engine/tts.py` is already lazy and
-method-scoped (`_load_clone` :130-137, `_load_design` :139-146,
-`_run_generate` :188-208). Module level only needs `numpy` + `soundfile`, so
-the whole pytest suite imports and runs on a machine with no MLX installed.
+## What's left — pick up here on the Mac
 
-### Phase 1 — Backend-agnostic refactor (on the Mac, merged before Phase 2)
+This work is **already merged to `main`** at Jeremy's request, so he could pull
+it on the MacBook in a fresh session. That inverts the usual rule in Phase 4
+("merge only after the Mac is green"), which means:
 
-MLX stays the only backend. Pure interface extraction, no behaviour change.
-Use TDD (`superpowers:test-driven-development`).
+> ⚠️ **`main` currently contains code that has never run on Apple Silicon.**
+> The Mac's launchd production service is still running whatever it had before.
+> Verify *before* you restart that agent, not after.
 
-- [ ] `engine/base.py` — `TTSEngineBase(ABC)` as sketched in feasibility doc
-      §5. Keep it **synchronous** (doc §4.1); do **not** add
-      `list_voices`/`validate_voice` (doc §4.2).
-- [ ] `engine/result.py` — move `TTSResult` (`engine/tts.py:48-94`) out of the
-      MLX module so `CUDAEngine` can import it without importing MLX code.
-      Must keep both usages: tuple unpacking and `.write(path)`.
-- [ ] `engine/mlx_engine.py` — today's `TTSEngine` (`engine/tts.py:97`) moved
-      and renamed to `MLXEngine(TTSEngineBase)`. Leave `engine/tts.py` as a
-      thin re-export shim (`from engine.mlx_engine import MLXEngine as
-      TTSEngine`) so the move commit doesn't also churn
-      `tests/conftest.py:47`'s `patch("engine.tts.TTSEngine")`.
-- [ ] `config.py` — `TTS_BACKEND = _env("TTS_BACKEND", "mlx")`, next to
-      `MODEL_SIZE` (`config.py:30`).
-- [ ] `engine/__init__.py` — `get_engine_class()` factory, the single place
-      that knows both class names exist (doc §5). Import the concrete class
-      lazily inside the function so a CUDA-less Mac never imports `torch`.
-- [ ] `jobs/tasks.py` — replace the three `from engine.tts import TTSEngine;
-      engine = TTSEngine()` pairs (`:61-63`, `:115-120`, `:215-217`) with the
-      factory. Update `tests/conftest.py`'s `mock_tts_engine` fixture to patch
-      the factory instead of the class.
-- [ ] `tests/test_engine_contract.py` (new, the important one) — parametrized
-      suite asserting a backend class satisfies the ABC surface from doc §2:
-      method presence and signatures, and that `generate_clone` /
-      `generate_design` return something both tuple-unpackable and
-      `.write()`-able. Parametrize over available backends, skipping any whose
-      deps aren't installed. **This is what makes Linux development safe** —
-      it proves a CUDA engine written on the Linux box drops into the Mac's
-      call sites.
-- [ ] `tests/test_engine_factory.py` (new) — `RURU_TTS_BACKEND` unset → MLX;
-      `=cuda` → CUDA class; unknown value → clear error.
-- [ ] Update `CLAUDE.md` (file layout + config table) and mark
-      `docs/nvidia_feasibility.md` §5 as implemented.
-- [ ] Verify on the Mac: `uv run pytest`, a real end-to-end narrate job through
-      the UI, then `./reset_service.sh restart-only`. Merge to `main` only
-      after that. (Kill any manually started `uv run ruru` first — known port
-      conflict.)
-
-### Phase 2 — `CUDAEngine` on the Linux clone
+### 1. Sync and install
 
 ```bash
-git clone git@github.com:BitsofJeremy/ruru.git && cd ruru
-uv sync --extra cuda
-uv run pytest            # must be green before writing anything
-git checkout -b cuda-backend
+cd <ruru repo on the Mac>
+git checkout main && git pull
+uv sync                    # PLAIN. Never `--extra cuda` on the Mac —
+                           # it would try to install torch + qwen-tts.
 ```
 
-- [ ] **Pre-flight before any code** — the phase is moot if the box isn't
-      ready:
-      - `nvidia-smi`
-      - `uv run python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"`
-      - Confirm `qwen-tts` still installs and the **non-MLX** Qwen3-TTS base +
-        VoiceDesign weights are downloadable; note free VRAM.
-      - If either fails, stop — don't write an engine against an API you can't
-        run.
-- [ ] `engine/cuda_engine.py` — `CUDAEngine(TTSEngineBase)`, ported from
+### 2. Run the suite
+
+```bash
+uv run pytest
+```
+
+Expect **all Linux-green tests to pass, plus more**: the Mac has `mlx_audio`,
+so the two `tests/test_tts_engine.py` generation tests and the MLX branch of
+`tests/test_engine_contract.py` will *run* there instead of skipping. Linux
+sees 167 passed / 4 skipped; the Mac should see roughly 170 passed / 1 skipped
+(the pre-existing `test_routes_voices` skip).
+
+If something fails, the likely culprits, in order:
+- `engine/tts.py` is now a **re-export shim**; anything still doing
+  `from engine.tts import TTSEngine` gets `MLXEngine` and should be fine, but
+  `patch("engine.tts.TTSEngine")` in any *untouched* test would now be patching
+  the wrong target — the factory is what handlers call.
+- `engine/result.py`'s `TTSResult` gained an optional `mp3_bytes`. MLX still
+  passes real mp3 bytes, so `.write("x.mp3")` should remain a byte copy with no
+  re-encode. Confirm you're not silently round-tripping through pydub.
+
+### 3. Real MLX narrate job
+
+Run one through the UI — not just the suite. This is the only thing that proves
+the refactor didn't change MLX behaviour, since every test mocks the model.
+Check the output MP3 actually plays and is the right length.
+
+### 4. Restart the launchd agent — last
+
+```bash
+./reset_service.sh restart-only
+```
+
+**Pay attention to this one.** `reset_service.sh` was deleted from the repo
+months ago and has just been recreated; the Mac has never run this version. Its
+`launchctl` path carries a bug fix that matters (commit `44de990`): the old
+`launchctl list | grep -q` idiom silently failed under `set -o pipefail`, which
+would have made every restart skip unloading the agent and leave the old
+process holding port 5151 — the exact "Port conflict" pitfall in CLAUDE.md.
+Confirm the agent really does stop and restart, and that the site comes back.
+
+Kill any manually started `uv run ruru` first.
+
+### 5. Optional, cheap, worth it
+
+A GitHub Actions job running `uv sync && uv run pytest` on `ubuntu-latest`. It
+won't catch MLX runtime regressions, but it catches every "this only imports on
+a Mac" mistake at push time — which is exactly the class of bug this branch was
+built to prevent.
+
+### If the Mac goes wrong
+
+`main` is four commits ahead of where it was. Last known-good commit before
+this work: **`60be0c8`**. The Linux production install at `/8TB/bin/ruru` is
+independent — it tracks its own checkout and won't be affected by anything you
+do to the Mac or to `main`.
+
+---
+
+### Production install, verified 2026-07-26
+
+- `ruru-web.service` **active and enabled** (starts on boot), running
+  `/8TB/bin/ruru/.venv/bin/ruru` as `jeremy` on port 5151.
+- `http://ruru.nexus.home.test/` returns the ruru Dashboard; `/voices`,
+  `/narrate`, `/static/`, and `/api/voices` all 200. The  voice
+  auto-seeded from `voice_clones/`.
+- **Full narrate job through nginx**: 331-word document → 4 chunks → a 101.60 s
+  MP3, normalized to max −3.4 dBFS, downloadable through the
+  `/audio/output/` alias (1.6 MB, `audio/mpeg`). Zero errors in the journal.
+- `./reset_service.sh restart-only` stops, clears state, and restarts cleanly;
+  the seeded voice survives.
+- **sprecher fully retired**: unit file deleted, no sprecher units remain, both
+  nginx configs gone. Its ~35,000-restart crash loop is over. Repo files on
+  disk untouched.
+- The production clone is a **separate checkout** at `/8TB/bin/ruru` with its
+  own Python 3.13.2 venv — not the Syncthing-synced dev tree. Its test suite
+  passes there too (167 passed, 4 skipped).
+
+### Two bugs found and fixed during the install
+
+1. **`pipefail` + `grep -q`** (commit `44de990`). `systemctl list-unit-files |
+   grep -q ...` returns 141, not 0, on a match: grep exits at the first hit,
+   the producer dies of SIGPIPE, and `pipefail` propagates that. The installer
+   therefore reported "no sprecher-web.service — nothing to do" while the unit
+   was live and crash-looping. The same pattern was in both of
+   `reset_service.sh`'s `stop_service` branches — the `launchctl` one would
+   have made **every macOS restart silently skip unloading the agent**, leaving
+   the old process holding port 5151. Capture to a variable, then grep it.
+2. **`reset_service.sh` checked for sudo too late** (commit `a686573`). It
+   stopped the service and cleared state before discovering it couldn't
+   authenticate to start it again, leaving nginx serving 502s. Now verified up
+   front, before anything destructive.
+
+Evidence already collected on Linux, with **ComfyUI stopped** and the **1.7B**
+models (`RURU_MODEL_SIZE=large`), i.e. the real production configuration:
+
+- `uv run pytest` → **167 passed, 4 skipped**, stable across repeat runs. The
+  skips are the two MLX-only generation tests, the MLX branch of the contract
+  suite, and one pre-existing `test_routes_voices` skip.
+- **Real 1.7B CUDA inference**, not mocks. Clone (`Qwen3-TTS-12Hz-1.7B-Base`)
+  off `voice_clones/.mp3`: 6.08 s of speech in 13.3 s. Design
+  (`-1.7B-VoiceDesign`): 4.08 s of speech in 8.5 s. Both wrote valid audio —
+  MP3 via the on-demand encode path, WAV via soundfile. No OOM warnings.
+- **The clone-prompt cache works**: first chunk 13.3 s (model load + prompt
+  build), second 3.4 s reusing the cached prompt — a ~4x saving per chunk.
+- **The single-model eviction policy works**: switching clone → design logged
+  the eviction, and afterwards `_clone_model is None` / `_design_model` resident.
+  VRAM went 9.90 GB free → 5.75 GB (clone) → 6.13 GB (design) → 9.90 GB after
+  `unload()`. One 1.7B model costs ~4-5 GB resident, so the pair would not fit
+  alongside ComfyUI — which is exactly why the policy exists.
+- **Full end-to-end narrate job through the running app** (`RURU_TTS_BACKEND=cuda`,
+  a 331-word document): parsed → 4 chunks → each cloned → assembled to a
+  102.64 s MP3, normalized to max -3.4 dBFS. Zero retries, zero errors. The
+  prompt was built once and reused for the other 3 chunks.
+- The app boots on the CUDA backend, serves `/`, `/voices`, `/api/voices`, and
+  auto-scans `voice_clones/.{mp3,txt}` into the library on startup.
+
+**Known cost, not a regression:** each job constructs a fresh engine
+(`get_engine_class()()` per handler, as `TTSEngine()` always did), so the model
+reloads per job — about 15-20 s of startup before the first chunk. Pre-existing
+MLX behaviour; worth revisiting separately if narration throughput matters.
+
+`install_linux.sh` has been run twice against `/8TB/bin/ruru` and is confirmed
+idempotent: the second run retired sprecher and left the healthy ruru service
+undisturbed.
+
+---
+
+## Pre-flight — verified 2026-07-26 on the Linux box. Do not re-run.
+
+| Check | Result |
+|---|---|
+| `torch.cuda.is_available()` | `True` — torch 2.13.0+cu130, "NVIDIA GeForce RTX 3060" |
+| `qwen_tts` | 0.1.1 installed; `Qwen3TTSModel.from_pretrained` / `create_voice_clone_prompt` / `generate_voice_clone` / `generate_voice_design` all present with the signatures WeirDing expects |
+| Weights cached | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` (4.3 G), `…-1.7B-VoiceDesign` (4.3 G), `…-0.6B-Base` (2.4 G) under `~/.cache/huggingface/hub` |
+| VRAM | 12288 MiB total. ~10.6 GB free with ComfyUI stopped; ComfyUI running holds ~8.2 GB and leaves too little for a 1.7B model |
+| Disk | `/8TB` — 1.1 T free |
+| `uv` | 0.9.17 |
+
+`flash-attn` is not installed; `qwen_tts` warns and falls back to the manual
+PyTorch path. That is fine — slower, not broken.
+
+## Decisions already made. Do not re-litigate.
+
+- **Linux prod install** is a fresh `git clone git@github.com:BitsofJeremy/ruru.git
+  /8TB/bin/ruru` with its own `.venv` and its own `RURU_WORK_DIR`.
+- **sprecher is fully removed** — its `sprecher-web.service` is crash-looping
+  every 5 s (`203/EXEC`: the checked-in `.venv` is a macOS venv, dangling on
+  Linux). Disable + delete the unit and both nginx configs. Leave the sprecher
+  repo files on disk alone.
+- **Address**: `ruru.nexus.home.test` → `127.0.0.1:5151`.
+- **VRAM policy**: `CUDAEngine` keeps **one model resident at a time** and always
+  uses the **1.7B** pair. It fails loudly when VRAM is short rather than silently
+  degrading. Stop ComfyUI before narrating.
+
+## Corrections — the docs lie about these
+
+- `reset_service.sh` had been deleted in `62ec10e` while CLAUDE.md and the old
+  TODO still told you to run it. **Recreated** in Phase 3, now cross-platform
+  (systemd on Linux, launchd on macOS).
+- `archive/install_linux.sh` **does not exist** on disk (purged in `99c9817`).
+  Recover it for reference with `git show 99c9817^:archive/install_linux.sh`.
+- `characters_data.py` and `_voices/` no longer exist. Voice seeding is
+  now a graceful no-op (`models/seed_voices.py:22-28`); voices come from tracked
+  `voice_clones/.{mp3,txt}` via `models/scan_voice_clones.py`.
+- `models/db.py` is **SQLAlchemy ORM** now (`set_db_path`, `get_sync_session`,
+  `Job`), not the raw SQL that CLAUDE.md describes.
+- `docs/nvidia_feasibility.md` §3's `reference_material/` and
+  `archive/private_removed_20260725/` paths do not exist. The live CUDA
+  references are `../WeirDing/engine/tts.py` (sync, the direct ancestor) and
+  `../sprecher/core/tts/qwen_engine.py` (the async ABC variant).
+- `docs/nvidia_feasibility.md` §1/§5's `jobs/tasks.py` line numbers are stale.
+  Actual engine call sites: `jobs/tasks.py:61-63`, `:115-120`, `:215-217`.
+
+---
+
+### Phase 0 — Make the repo installable on Linux — ✅ DONE (commit `60be0c8`)
+
+`pyproject.toml` already carries the platform markers and the CUDA extra:
+
+```toml
+"mlx ; sys_platform == 'darwin'",
+"mlx-audio ; sys_platform == 'darwin'",
+
+[project.optional-dependencies]
+cuda = ["torch>=2.0.0", "qwen-tts"]
+```
+
+`uv.lock` stays gitignored — each machine resolves its own. Do not start
+committing it.
+
+This works because every MLX import in `engine/tts.py` is lazy and
+method-scoped (`_load_clone` :130-137, `_load_design` :139-146, `_run_generate`
+:188-208). Module level needs only `numpy` + `soundfile`, so the whole suite
+imports on a machine with no MLX.
+
+### Phase 0.5 — Green pytest baseline on Linux — ✅ DONE
+
+`uv run pytest` on the Linux box is **3 failed, 116 passed, 1 skipped** today.
+Fix this first, so later failures mean something.
+
+- [x] `tests/test_tts_engine.py` patches `mlx_audio.tts.utils.load_model` and
+      `mlx_audio.tts.generate.generate_audio` (lines 56-57, 73-74), which don't
+      import off Darwin. Add a module-level
+      `pytest.importorskip("mlx_audio")`. These become MLX-only tests; the new
+      contract suite in Phase 1 covers the shared surface on both platforms.
+- [x] `tests/test_job_queue.py::TestJobRunner::test_enqueue_returns_future`
+      passes alone but fails in a full run — the real `run_generate_tts` runs
+      and hits `RuntimeError: Database path not set`. Make it enqueue a stub
+      handler (or `set_db_path` to a tmp DB) instead of depending on test order.
+- [x] Verify on Linux: `uv run pytest` fully green.
+- [ ] Verify on the **Mac**: `uv run pytest` — confirms the `find_spec` gating
+      didn't skip anything that should still run there. See "What's left".
+
+### Phase 1 — Backend-agnostic refactor — ✅ DONE (Linux; Mac verification pending)
+
+MLX stays the only backend. Pure interface extraction, no behaviour change. Use
+TDD (`superpowers:test-driven-development`). Merge to `main` before Phase 2.
+
+- [x] `engine/result.py` — move `TTSResult` (`engine/tts.py:48-94`) out of the
+      MLX module so `CUDAEngine` can import it without importing MLX code. One
+      addition: make `mp3_bytes` **optional** — `.write()` to a `.mp3` path with
+      empty `mp3_bytes` should encode from `self.wav`/`self.sr` via pydub
+      (already a dep, ffmpeg present) instead of raising. MLX supplies mp3 bytes
+      natively and keeps its zero-recode path; CUDA yields raw ndarrays and
+      shouldn't be forced through a pointless encode.
+      Must keep **both** existing usages: tuple unpacking
+      (`__iter__`/`__len__`/`__getitem__`) and attribute access —
+      `jobs/tasks.py:167` does `len(candidate.wav) / candidate.sr`.
+- [x] `engine/base.py` — `TTSEngineBase(ABC)`, **synchronous** (doc §4.1).
+      Abstract: `load(size="auto")`, `unload()`, `is_loaded` (property),
+      `generate_clone(text, ref_audio_path, ref_text, language="English") -> TTSResult`,
+      `generate_design(text, voice_description, language="English") -> TTSResult`.
+      Concrete on the base, since both backends are identical here — lift
+      `generate_to_file` (`engine/tts.py:298-326`) and the `_resolve_ref_text`
+      static helper (`:163-173`) as-is.
+      Do **not** add `list_voices`/`validate_voice` (doc §4.2). Keep
+      `create_clone_prompt` **off** the ABC — MLX's is a no-op shim, CUDA's is a
+      real optimization.
+- [x] `engine/mlx_engine.py` — today's `TTSEngine` (`engine/tts.py:97`) moved and
+      renamed `MLXEngine(TTSEngineBase)`. Leave `engine/tts.py` as a thin
+      re-export shim (`from engine.mlx_engine import MLXEngine as TTSEngine`) so
+      the move commit doesn't also churn every `patch("engine.tts.TTSEngine")`.
+- [x] `config.py` — `TTS_BACKEND = _env("TTS_BACKEND", "mlx")`, next to
+      `MODEL_SIZE` (`config.py:30`).
+- [x] `engine/__init__.py` (empty today) — `get_engine_class(backend=None)`
+      factory, the single place that knows both class names exist (doc §5).
+      Defaults to `config.TTS_BACKEND`. Import the concrete class **lazily inside
+      the function** so a Mac never imports `torch` and Linux never imports
+      `mlx`. Unknown value → `ValueError` naming the valid options.
+- [x] `jobs/tasks.py` — replace the three
+      `from engine.tts import TTSEngine; engine = TTSEngine()` pairs (`:61-63`,
+      `:115-120`, `:215-217`) with
+      `from engine import get_engine_class; engine = get_engine_class()()`.
+- [x] Repoint the tests — `tests/conftest.py:47`'s `mock_tts_engine` and the
+      seven `@patch("engine.tts.TTSEngine")` decorators in
+      `tests/test_job_tasks.py` (lines 94, 121, 147, 185, 210, 237, 267) → patch
+      `engine.get_engine_class`. While there: `mock_tts_engine` returns a raw
+      `(MOCK_WAV, 24000)` tuple, which has no `.wav`/`.sr`/`.write` and so can't
+      actually drive `jobs/tasks.py` — which is why `test_job_tasks.py` ignores
+      the fixture and rolls its own `_fake_audio()`. Make the fixture return a
+      real `TTSResult` and delete the duplicate helper.
+- [x] `tests/test_engine_contract.py` (new — **the important one**) —
+      parametrized suite asserting a backend class satisfies the ABC surface
+      from doc §2: method presence, signature compatibility, and that
+      `generate_clone`/`generate_design` return something both tuple-unpackable
+      **and** `.write()`-able with `.wav`/`.sr`. Parametrize over available
+      backends, skipping any whose deps aren't installed. **This is what makes
+      Linux development safe** — it proves a CUDA engine written on Linux drops
+      into the Mac's call sites.
+- [x] `tests/test_engine_factory.py` (new) — `RURU_TTS_BACKEND` unset →
+      `MLXEngine`; `=cuda` → `CUDAEngine`; unknown value → clear error.
+- [x] Update `CLAUDE.md` (file layout + config table, plus the stale facts in
+      "Corrections" above) and mark `docs/nvidia_feasibility.md` §5 implemented.
+- [ ] **Not yet done** — verify on the Mac: `uv run pytest`, a real end-to-end
+      narrate job through the UI, then restart the launchd agent. (Kill any
+      manually started `uv run ruru` first — known port conflict.) See
+      "What's left".
+
+### Phase 2 — `CUDAEngine` on the Linux clone — ✅ DONE
+
+```bash
+uv sync --extra cuda
+uv run pytest            # must be green before writing anything
+```
+
+- [x] `engine/cuda_engine.py` — `CUDAEngine(TTSEngineBase)`, ported from
       `../WeirDing/engine/tts.py` (`load` :43, `unload` :100, `is_loaded` :114,
       `generate_clone` :121, `generate_design` :223, `generate_to_file` :257).
       Required changes against that source:
       - Return `TTSResult` from `engine/result.py`, not raw `(wav, sr)` tuples
-        (doc §2) — the one real porting hazard.
-      - Keep `torch` / `qwen_tts` imports lazy and method-scoped, matching the
-        MLX engine, so importing the module on the Mac is harmless.
+        (doc §2). WeirDing returns `wavs[0], sr` — wrap it. **This is the one
+        real porting hazard.**
+      - Keep `torch` / `qwen_tts` imports lazy and method-scoped (WeirDing
+        already does this) so importing the module on the Mac is harmless.
       - Keep the `torch.cuda.is_available()` hard gate in `load()`.
-      - `create_clone_prompt` / `generate_clone_with_prompt` (WeirDing :166,
-        :193) are a CUDA-only optimization — port as extras, not ABC members.
-- [ ] Verify on Linux: contract suite passes for `CUDAEngine`, then
-      `RURU_TTS_BACKEND=cuda uv run ruru` and a real narrate job end to end.
+      - **Single-model VRAM policy.** `_load_clone()` evicts `_design_model` and
+        vice versa (`del`, `gc.collect()`, `torch.cuda.empty_cache()`) before
+        loading. Always the 1.7B pair; `size="small"` is honoured only when
+        explicitly passed, `auto` means large. Do **not** copy WeirDing's
+        total-VRAM auto-detect — on this box it reads 12 GB and ignores that
+        ComfyUI holds 9 of them. Log free VRAM at load and let an OOM surface as
+        a real error.
+      - **Cache the clone prompt.** `jobs/tasks.py:161` calls `generate_clone`
+        once per chunk, and building the voice-clone prompt is the expensive
+        per-call GPU op that WeirDing explicitly hoists out
+        (`create_clone_prompt` :166, `generate_clone_with_prompt` :193) and that
+        sprecher wastefully rebuilds every call. Cache it inside `CUDAEngine`
+        keyed by `(ref_audio_path, mtime, ref_text)` so `generate_clone` reuses
+        it transparently — no ABC change, no caller change.
+      - `generate_voice_design` takes `instruct=`, not `voice_description=`.
+- [x] Verify on Linux: contract suite green for `CUDAEngine`; then stop ComfyUI,
+      `RURU_TTS_BACKEND=cuda uv run ruru`, and run a real narrate job end to end.
 
-### Phase 3 — Cross-machine verification loop
+### Phase 3 — Linux production install at `/8TB/bin/ruru` — ✅ DONE
+
+New `install_linux.sh` at the repo root. Model it on `install_macos.sh` — the
+more complete script; it does `uv sync`, DB init, and derives every path from
+`BASH_SOURCE` rather than `$HOME`, which matters under sudo — with the
+systemd/nginx bits from `git show 99c9817^:archive/install_linux.sh`. Idempotent,
+run as `sudo bash install_linux.sh`.
+
+- [x] **Decommission sprecher**, guarded so it skips cleanly when already gone:
+      `systemctl disable --now sprecher-web`,
+      `rm /etc/systemd/system/sprecher-web.service`, `systemctl daemon-reload`,
+      `rm /etc/nginx/sites-{enabled,available}/sprecher-web`.
+- [x] **Paths** — `APP_DIR` from `BASH_SOURCE` (`/8TB/bin/ruru`),
+      `WORK_DIR=$APP_DIR/data`; mkdir `data/cache/{uploads,chunks,output,voices}`
+      and `data/logs`. Note the **`cache/` level** — the old WeirDing script used
+      a flat `data/{uploads,output,…}` layout that current code does not expect.
+- [x] **Deps + DB** as the real user (`SUDO_USER`, via an `as_user()` helper like
+      install_macos.sh's): `uv sync --extra cuda`, then DB init via `$VENV_PY`.
+- [x] **systemd unit** `/etc/systemd/system/ruru-web.service`: `User=jeremy`,
+      `WorkingDirectory=/8TB/bin/ruru`,
+      `ExecStart=/8TB/bin/ruru/.venv/bin/ruru`, `Restart=on-failure`,
+      `RestartSec=5`, journal logging, `WantedBy=multi-user.target`, and
+      `Environment=` for `RURU_WORK_DIR=/8TB/bin/ruru/data`,
+      `RURU_TTS_BACKEND=cuda`, `RURU_PORT=5151`, `RURU_MODEL_SIZE=large`, and
+      `HF_HOME=/home/jeremy/.cache/huggingface` so the service reuses the ~11 GB
+      of already-downloaded weights instead of re-fetching them.
+      Then `systemctl daemon-reload && systemctl enable --now ruru-web`.
+- [x] **nginx** `/etc/nginx/sites-available/ruru` + `sites-enabled` symlink:
+      `server_name ruru.nexus.home.test`, `client_max_body_size 0`,
+      `proxy_read_timeout 86400s`, HX-* and Upgrade/Connection headers,
+      `proxy_pass http://127.0.0.1:5151`, plus direct `alias` blocks for
+      `/static/`, `/audio/output/` → `data/cache/output/`, and `/audio/voices/`
+      → `data/cache/voices/`. Run `nginx -t` before reloading.
+- [x] **`reset_service.sh`** — recreate it, systemd-flavoured. Recover the
+      deleted macOS version for structure (`git show 62ec10e^:reset_service.sh`)
+      and swap `launchctl` for `systemctl`. Commands: `restart-only`,
+      `clean-only`, `reset-db`, `clean-all`, `help`. Then fix the dangling
+      references to it in `CLAUDE.md`.
+- [x] **Docs** — add a Linux production section to `CLAUDE.md`, and Linux
+      teardown steps to `docs/uninstall.md`.
+- [x] Verify: `systemctl status ruru-web` active; `http://ruru.nexus.home.test/`
+      loads; the  voice appears in the library (auto-scanned from tracked
+      `voice_clones/.{mp3,txt}`); a real narrate job completes and the MP3
+      downloads; `systemctl restart ruru-web` recovers cleanly.
+
+### Phase 4 — Cross-machine verification loop
 
 Standing rules for every round trip:
 
 1. Push `cuda-backend` from Linux.
 2. On the Mac: `git fetch && git checkout cuda-backend && uv sync` (plain —
-   **never** `--extra cuda` on the Mac) → `uv run pytest` → real MLX narrate
+   **never** `--extra cuda` on the Mac) → `uv run pytest` → a real MLX narrate
    smoke test.
 3. Merge to `main` only after the Mac is green. Restart the launchd agent last.
 4. The Linux box never installs `mlx`; the Phase 0 markers enforce it.
 
-- [ ] Optional, cheap, worth it: a GitHub Actions job running `uv sync && uv
-      run pytest` on `ubuntu-latest`. It won't catch MLX runtime regressions,
-      but it catches every "this only imports on a Mac" mistake at push time,
-      so the Mac pull becomes a formality rather than the first signal.
+- [ ] Optional, cheap, worth it: a GitHub Actions job running `uv sync && uv run
+      pytest` on `ubuntu-latest`. It won't catch MLX runtime regressions, but it
+      catches every "this only imports on a Mac" mistake at push time, so the Mac
+      pull becomes a formality rather than the first signal.
 
 ### Verification summary
 
 | Where | Command | Proves |
 |---|---|---|
-| Mac, Phase 0 | `uv run pytest` | markers didn't break the Mac install |
-| Mac, Phase 1 | `uv run pytest` + UI narrate job + `./reset_service.sh restart-only` | refactor is behaviour-neutral in prod |
-| Linux, Phase 2 | `uv run pytest` (incl. contract suite vs `CUDAEngine`) | CUDA engine satisfies the shared contract |
-| Linux, Phase 2 | `RURU_TTS_BACKEND=cuda uv run ruru` + narrate job | CUDA inference actually works |
-| Mac, Phase 3 | `uv run pytest` + narrate job on `cuda-backend` | Linux work didn't break MLX |
+| Linux, Phase 0.5 | `uv run pytest` | green baseline off Darwin |
+| Mac, Phase 0.5 | `uv run pytest` | the test gating didn't skip anything real on the Mac |
+| Both, Phase 1 | `uv run pytest` (incl. contract + factory suites) | refactor is behaviour-neutral |
+| Linux, Phase 2 | `uv run pytest` contract suite vs `CUDAEngine` | CUDA engine satisfies the shared contract |
+| Linux, Phase 2 | ComfyUI stopped → `RURU_TTS_BACKEND=cuda uv run ruru` + narrate job | CUDA inference actually works |
+| Linux, Phase 3 | `systemctl status ruru-web` + narrate job via `ruru.nexus.home.test` | the production install works |
+| Mac, Phase 4 | `uv run pytest` + narrate job on `cuda-backend` | Linux work didn't break MLX |
 
 ---
 
@@ -153,4 +436,7 @@ Standing rules for every round trip:
 
 - No CSRF protection (acceptable for a single-user local app).
 - Voice edit page's image upload/remove controls call `/api/voices/{id}/image`,
-  which doesn't exist yet (404). See `PROGRESS.md` "Session: 2026-07-10".
+  which doesn't exist yet (404).
+- `.venv` directories are checked into the Syncthing-synced tree, so a macOS
+  venv lands on Linux and vice versa. This is what broke `sprecher-web.service`
+  (`203/EXEC`). Make sure `.venv/` is gitignored *and* excluded from Syncthing.

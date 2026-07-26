@@ -11,6 +11,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+from tests.conftest import fake_audio
+
 
 @pytest.fixture
 def job_db(tmp_db, tmp_work_dir):
@@ -62,37 +64,9 @@ def task_env(job_db, tmp_work_dir, monkeypatch):
     return {"job_id": job_db, "output_dir": out}
 
 
-def _fake_audio(duration_s: float = 1.0, sr: int = 24000):
-    """A fake TTS result whose .write() actually creates the file on disk.
-
-    Handlers call result.write(output_path); a plain MagicMock would record the
-    call but leave no file behind, so write() is wired to create a real (tiny)
-    file and the output-path assertions stay meaningful.
-
-    ``.wav``/``.sr`` are set to a real array so run_narrate_document's
-    duration-based glitch check (len(wav)/sr) can compare against a genuine
-    number instead of a MagicMock; 1.0s comfortably covers the short (2-word)
-    chunk texts used in these tests (expected ~0.8s at the assumed 150 wpm).
-    """
-    import numpy as np
-
-    audio = MagicMock()
-    audio.wav = np.zeros(int(duration_s * sr), dtype=np.float32)
-    audio.sr = sr
-
-    def _write(path):
-        from pathlib import Path
-        out = Path(path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(b"fake-audio")
-
-    audio.write.side_effect = _write
-    return audio
-
-
 class TestRunGenerateTTS:
-    @patch("engine.tts.TTSEngine")
-    def test_clone_when_ref_audio_exists(self, mock_engine_cls, task_env, tmp_path):
+    @patch("engine.get_engine_class")
+    def test_clone_when_ref_audio_exists(self, mock_get_engine_class, task_env, tmp_path):
         """A payload whose ref_audio_path points to a real file routes to clone,
         even though voice_type is the seeded '' label (BUG 1)."""
         from jobs.tasks import run_generate_tts
@@ -100,10 +74,10 @@ class TestRunGenerateTTS:
         ref = tmp_path / "ref.wav"
         ref.write_bytes(b"RIFF\x00\x00")  # a real file on disk
 
-        audio = _fake_audio()
+        audio = fake_audio()
         engine = MagicMock()
         engine.generate_clone.return_value = audio
-        mock_engine_cls.return_value = engine
+        mock_get_engine_class.return_value.return_value = engine
 
         result = run_generate_tts(
             task_env["job_id"],
@@ -118,16 +92,16 @@ class TestRunGenerateTTS:
         audio.write.assert_called_once()
         assert (task_env["output_dir"] / f"tts_{task_env['job_id']}.wav").exists()
 
-    @patch("engine.tts.TTSEngine")
-    def test_design_when_ref_audio_missing(self, mock_engine_cls, task_env):
+    @patch("engine.get_engine_class")
+    def test_design_when_ref_audio_missing(self, mock_get_engine_class, task_env):
         """No usable ref audio on disk -> design branch (the original bug: every
         '' voice wrongly took design, but here it is the correct call)."""
         from jobs.tasks import run_generate_tts
 
-        audio = _fake_audio()
+        audio = fake_audio()
         engine = MagicMock()
         engine.generate_design.return_value = audio
-        mock_engine_cls.return_value = engine
+        mock_get_engine_class.return_value.return_value = engine
 
         result = run_generate_tts(
             task_env["job_id"],
@@ -144,18 +118,18 @@ class TestRunGenerateTTS:
 
 
 class TestRunNarrateDocument:
-    @patch("engine.tts.TTSEngine")
-    def test_narrate_calls_clone_per_chunk(self, mock_engine_cls, task_env, tmp_path):
+    @patch("engine.get_engine_class")
+    def test_narrate_calls_clone_per_chunk(self, mock_get_engine_class, task_env, tmp_path):
         """Narration with a real ref audio clones once per chunk."""
         from jobs.tasks import run_narrate_document
 
         ref = tmp_path / "ref.wav"
         ref.write_bytes(b"RIFF\x00\x00")
 
-        audio = _fake_audio()
+        audio = fake_audio()
         engine = MagicMock()
         engine.generate_clone.return_value = audio
-        mock_engine_cls.return_value = engine
+        mock_get_engine_class.return_value.return_value = engine
 
         # assemble_chunks now writes the final file itself and returns a bool.
         # Have the mock create the output file so the completion path is exercised.
@@ -182,17 +156,17 @@ class TestRunNarrateDocument:
         mock_assemble.assert_called_once()
         assert (task_env["output_dir"] / f"narrate_{task_env['job_id']}.mp3").exists()
 
-    @patch("engine.tts.TTSEngine")
-    def test_narrate_falls_back_to_design(self, mock_engine_cls, task_env):
+    @patch("engine.get_engine_class")
+    def test_narrate_falls_back_to_design(self, mock_get_engine_class, task_env):
         """Narration without ref audio uses the design branch per chunk."""
         from jobs.tasks import run_narrate_document
 
-        audio = _fake_audio()
+        audio = fake_audio()
         engine = MagicMock()
         engine.generate_design.return_value = audio
-        mock_engine_cls.return_value = engine
+        mock_get_engine_class.return_value.return_value = engine
 
-        mock_final = _fake_audio()
+        mock_final = fake_audio()
         with patch("engine.assembler.assemble_chunks", return_value=mock_final):
             result = run_narrate_document(
                 task_env["job_id"],
@@ -207,17 +181,17 @@ class TestRunNarrateDocument:
         engine.generate_design.assert_called_once()
         engine.generate_clone.assert_not_called()
 
-    @patch("engine.tts.TTSEngine")
-    def test_narrate_retries_glitched_chunk(self, mock_engine_cls, task_env):
+    @patch("engine.get_engine_class")
+    def test_narrate_retries_glitched_chunk(self, mock_get_engine_class, task_env):
         """A too-short (truncated) first attempt is retried and the good
         second attempt is what gets written."""
         from jobs.tasks import run_narrate_document
 
-        bad = _fake_audio(duration_s=0.05)  # way under expected ~0.8s
-        good = _fake_audio(duration_s=1.0)
+        bad = fake_audio(duration_s=0.05)  # way under expected ~0.8s
+        good = fake_audio(duration_s=1.0)
         engine = MagicMock()
         engine.generate_design.side_effect = [bad, good]
-        mock_engine_cls.return_value = engine
+        mock_get_engine_class.return_value.return_value = engine
 
         with patch("engine.assembler.assemble_chunks", return_value=True):
             result = run_narrate_document(
@@ -234,17 +208,17 @@ class TestRunNarrateDocument:
         good.write.assert_called_once()
         bad.write.assert_not_called()
 
-    @patch("engine.tts.TTSEngine")
-    def test_narrate_keeps_last_attempt_after_exhausting_retries(self, mock_engine_cls, task_env):
+    @patch("engine.get_engine_class")
+    def test_narrate_keeps_last_attempt_after_exhausting_retries(self, mock_get_engine_class, task_env):
         """If every attempt still looks glitched, keep the last one and let
         the job complete rather than aborting the whole narration."""
         from jobs.tasks import run_narrate_document
         from config import MAX_RETRIES
 
-        always_bad = [_fake_audio(duration_s=0.05) for _ in range(MAX_RETRIES)]
+        always_bad = [fake_audio(duration_s=0.05) for _ in range(MAX_RETRIES)]
         engine = MagicMock()
         engine.generate_design.side_effect = always_bad
-        mock_engine_cls.return_value = engine
+        mock_get_engine_class.return_value.return_value = engine
 
         with patch("engine.assembler.assemble_chunks", return_value=True):
             result = run_narrate_document(
@@ -264,18 +238,18 @@ class TestRunNarrateDocument:
 
 
 class TestRunRegenerateChapter:
-    @patch("engine.tts.TTSEngine")
-    def test_regenerate_clone(self, mock_engine_cls, task_env, tmp_path):
+    @patch("engine.get_engine_class")
+    def test_regenerate_clone(self, mock_get_engine_class, task_env, tmp_path):
         """Chapter regeneration clones when a ref audio file is present."""
         from jobs.tasks import run_regenerate_chapter
 
         ref = tmp_path / "ref.wav"
         ref.write_bytes(b"RIFF\x00\x00")
 
-        audio = _fake_audio()
+        audio = fake_audio()
         engine = MagicMock()
         engine.generate_clone.return_value = audio
-        mock_engine_cls.return_value = engine
+        mock_get_engine_class.return_value.return_value = engine
 
         result = run_regenerate_chapter(
             task_env["job_id"],

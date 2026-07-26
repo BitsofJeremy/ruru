@@ -5,10 +5,18 @@ the Qwen3-TTS 12Hz codec's frame_rate=12.5), which a long chunk can hit
 mid-utterance and come back truncated/looping. TTSEngine must pass an
 explicit, per-chunk max_tokens instead of relying on that fixed default.
 """
+from importlib.util import find_spec
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 import soundfile as sf
+
+requires_mlx = pytest.mark.skipif(
+    find_spec("mlx_audio") is None,
+    reason="mlx_audio is Apple-Silicon only; the cross-platform engine surface "
+           "is covered by tests/test_engine_contract.py",
+)
 
 
 class TestEstimateMaxTokens:
@@ -33,6 +41,7 @@ class TestEstimateMaxTokens:
         assert _estimate_max_tokens(text) == expected_tokens
 
 
+@requires_mlx
 class TestGenerateClonePassesMaxTokens:
     def _write_fake_output(self, **kwargs):
         out_dir = kwargs["output_path"]

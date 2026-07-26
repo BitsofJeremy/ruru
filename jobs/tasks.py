@@ -58,9 +58,9 @@ def _should_clone(payload: dict) -> bool:
 def run_generate_tts(job_id: int, **payload) -> dict:
     """Handle TTS generation job."""
     from models.db import get_sync_session, Job
-    from engine.tts import TTSEngine
+    from engine import get_engine_class
 
-    engine = TTSEngine()
+    engine = get_engine_class()()
 
     try:
         with next(get_sync_session()) as session:
@@ -112,12 +112,12 @@ def run_generate_tts(job_id: int, **payload) -> dict:
 def run_narrate_document(job_id: int, **payload) -> dict:
     """Handle document narration job."""
     from models.db import get_sync_session, Job
-    from engine.tts import TTSEngine
+    from engine import get_engine_class
     from engine.chunker import split_into_chunks
     from engine.assembler import assemble_chunks
     from config import MAX_RETRIES
 
-    engine = TTSEngine()
+    engine = get_engine_class()()
 
     try:
         chunks = payload.get("chunks", [])
@@ -212,9 +212,9 @@ def run_narrate_document(job_id: int, **payload) -> dict:
 def run_regenerate_chapter(job_id: int, **payload) -> dict:
     """Handle chapter regeneration job."""
     from models.db import get_sync_session, Job
-    from engine.tts import TTSEngine
+    from engine import get_engine_class
 
-    engine = TTSEngine()
+    engine = get_engine_class()()
 
     try:
         with next(get_sync_session()) as session:
