@@ -44,6 +44,115 @@ Summary, evidence inline further down:
   downgrade recurring; proven to fail against a real 0.2.10 install.
 - Not done: §6 CI (optional, not attempted this session).
 
+---
+
+## NEXT — pick up here on the Linux box
+
+The Mac is done and `main` is at `596f0a0`. Linux has **not** pulled this yet:
+`http://ruru.nexus.home.test/` is currently serving **v0.5.0 on the CUDA
+backend**, healthy, from whatever commit it installed at (`213f5af` or
+earlier). Nothing is broken — this is a routine catch-up, with **one hazard**.
+
+### ⚠️ The one thing that will break the service
+
+**`uv sync` on its own no longer installs a backend.** After the extras change
+in `a8ea1cf`, `torch` and `qwen-tts` live *only* behind `--extra cuda`. A plain
+`uv sync` in the production clone will happily succeed while **uninstalling
+torch and qwen-tts**, and `ruru-web.service` will then fail on the first
+generation with an import error.
+
+Always: `uv sync --extra cuda`
+
+Never pass both extras (`--extra mlx --extra cuda`) — uv will refuse, and that
+refusal is the whole point of the fix. On Linux the `mlx` extra resolves to
+nothing anyway (its two deps carry `sys_platform == 'darwin'` markers), so
+there is no risk of pulling MLX onto the box.
+
+`install_linux.sh` already passes `--extra cuda`, so re-running the installer
+is safe and is the lowest-risk path if you'd rather not do it by hand.
+
+### Steps
+
+Two clones to update. The **dev** clone (Syncthing-synced) and the
+**production** clone at `/8TB/bin/ruru`. Do dev first.
+
+```bash
+# 1. Dev clone (Syncthing-synced — dev only, never a service dir)
+cd <ruru dev clone>
+git pull                      # -> 596f0a0
+uv sync --extra cuda          # NOT plain `uv sync`
+uv run pytest
+```
+
+```bash
+# 2. Production clone — only after dev is green
+cd /8TB/bin/ruru
+git status --short            # expect clean
+git pull                      # -> 596f0a0
+uv sync --extra cuda
+uv run pytest
+```
+
+Then a real generation **before** restarting anything — the suite mocks the
+engine, so green proves nothing about CUDA actually working:
+
+```bash
+# ComfyUI must be stopped — it holds ~8 GB and a 1.7B model needs ~4-5 GB
+uv run python -c "
+from engine import get_engine_class
+e = get_engine_class('cuda')()
+e.generate_clone('Testing one two three',
+                 'voice_clones/lilith.mp3',
+                 'voice_clones/lilith.txt').write('/tmp/cuda_check.mp3')"
+file /tmp/cuda_check.mp3      # must say 'MPEG ... Audio'
+```
+
+Restart last:
+
+```bash
+./reset_service.sh restart-only     # or: sudo systemctl restart ruru-web
+```
+
+### What to expect
+
+- **`uv.lock` regenerates.** It is gitignored, so this clone resolves its own.
+  The CUDA side still pins `transformers==4.57.3` via `qwen-tts` — unchanged,
+  and now isolated from the Mac's resolution rather than dictating it.
+- **Test counts will differ from the old 167 passed / 4 skipped baseline** —
+  tests have been added since (the Mac now sees 175/6). The new
+  `TestMLXHasQwen3TTSArchitecture` **skips** on Linux (`mlx_audio` not
+  installed), which is correct. Record whatever number you actually get as the
+  new baseline rather than matching it to the Mac's.
+- **Two `test_voice_seed.py` failures are possible but not expected here.**
+  They appear only in a checkout carrying a local, gitignored
+  `characters_data.py` — the Mac production clone has one, Linux probably
+  doesn't. See the entry under "Other open items" for the root cause; it is a
+  test-isolation bug, not a code regression, and does not block the restart.
+
+### Verify
+
+- `systemctl status ruru-web` → active
+- `curl -s -o /dev/null -w '%{http_code}' http://ruru.nexus.home.test/` → 200
+- `curl -s http://ruru.nexus.home.test/api/voices` → still **13 voices**
+- Sidebar still reads **CUDA** and the version
+- One real narrate job end to end through nginx
+- `journalctl -u ruru-web -f` → no import errors on the first generation
+
+### If it goes wrong
+
+Last known-good for the Linux production clone is **`213f5af`** (what it is
+running now):
+
+```bash
+cd /8TB/bin/ruru && git reset --hard 213f5af && uv sync --extra cuda
+sudo systemctl restart ruru-web
+```
+
+The Mac is independent and already verified at `596f0a0`; nothing you do on
+Linux affects it.
+
+---
+
 ## STATUS as of 2026-07-26 — read this first
 
 Merged to `main`. Phases 0 through 3 are **done and running in
@@ -194,10 +303,12 @@ should never mean "no speech".
 
 ### 6. Optional, cheap, worth it
 
-A GitHub Actions job running `uv sync && uv run pytest` on `ubuntu-latest`. It
-won't catch MLX runtime regressions, but it catches every "this only imports on
-a Mac" mistake at push time — which is exactly the class of bug this branch was
-built to prevent.
+A GitHub Actions job running `uv sync --extra cuda && uv run pytest` on
+`ubuntu-latest`. It won't catch MLX runtime regressions, but it catches every
+"this only imports on a Mac" mistake at push time — which is exactly the class
+of bug this branch was built to prevent. (Plain `uv sync` would be faster —
+no torch download — but since `a8ea1cf` it installs no backend, so the
+CUDA-gated tests would all skip and the run would prove much less.)
 
 ### If the Mac goes wrong
 
@@ -545,16 +656,18 @@ run as `sudo bash install_linux.sh`.
 Standing rules for every round trip:
 
 1. Push `cuda-backend` from Linux.
-2. On the Mac: `git fetch && git checkout cuda-backend && uv sync` (plain —
-   **never** `--extra cuda` on the Mac) → `uv run pytest` → a real MLX narrate
-   smoke test.
+2. On the Mac: `git fetch && git checkout cuda-backend && uv sync --extra mlx`
+   (**never** `--extra cuda` on the Mac, and never plain `uv sync` — since
+   `a8ea1cf` that installs no backend at all) → `uv run pytest` → a real MLX
+   narrate smoke test.
 3. Merge to `main` only after the Mac is green. Restart the launchd agent last.
 4. The Linux box never installs `mlx`; the Phase 0 markers enforce it.
 
-- [ ] Optional, cheap, worth it: a GitHub Actions job running `uv sync && uv run
-      pytest` on `ubuntu-latest`. It won't catch MLX runtime regressions, but it
-      catches every "this only imports on a Mac" mistake at push time, so the Mac
-      pull becomes a formality rather than the first signal.
+- [ ] Optional, cheap, worth it: a GitHub Actions job running `uv sync --extra
+      cuda && uv run pytest` on `ubuntu-latest`. It won't catch MLX runtime
+      regressions, but it catches every "this only imports on a Mac" mistake at
+      push time, so the Mac pull becomes a formality rather than the first
+      signal.
 
 ### Verification summary
 
