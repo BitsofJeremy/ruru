@@ -18,17 +18,89 @@ gets pulled and verified there before merging to `main`. Linux production is a
 
 ## STATUS as of 2026-07-26 — read this first
 
-Branch `cuda-backend`, pushed. Phases 0 through 3 are **done and running in
+Merged to `main`. Phases 0 through 3 are **done and running in
 production on Linux**. `http://ruru.nexus.home.test/` serves ruru on the CUDA
 backend from `/8TB/bin/ruru`, via `ruru-web.service` behind nginx.
 
-**All that remains is the Mac side:**
+---
 
-| Remaining work | Owner |
-|---|---|
-| Pull `cuda-backend` on the Mac: `uv sync` (**plain — never** `--extra cuda`) → `uv run pytest` → a real MLX narrate smoke test | archie, on the Mac |
-| Merge to `main`, restart the launchd agent last | archie |
-| Optional GitHub Actions `ubuntu-latest` job (Phase 4) | archie |
+## What's left — pick up here on the Mac
+
+This work is **already merged to `main`** at Jeremy's request, so he could pull
+it on the MacBook in a fresh session. That inverts the usual rule in Phase 4
+("merge only after the Mac is green"), which means:
+
+> ⚠️ **`main` currently contains code that has never run on Apple Silicon.**
+> The Mac's launchd production service is still running whatever it had before.
+> Verify *before* you restart that agent, not after.
+
+### 1. Sync and install
+
+```bash
+cd <ruru repo on the Mac>
+git checkout main && git pull
+uv sync                    # PLAIN. Never `--extra cuda` on the Mac —
+                           # it would try to install torch + qwen-tts.
+```
+
+### 2. Run the suite
+
+```bash
+uv run pytest
+```
+
+Expect **all Linux-green tests to pass, plus more**: the Mac has `mlx_audio`,
+so the two `tests/test_tts_engine.py` generation tests and the MLX branch of
+`tests/test_engine_contract.py` will *run* there instead of skipping. Linux
+sees 167 passed / 4 skipped; the Mac should see roughly 170 passed / 1 skipped
+(the pre-existing `test_routes_voices` skip).
+
+If something fails, the likely culprits, in order:
+- `engine/tts.py` is now a **re-export shim**; anything still doing
+  `from engine.tts import TTSEngine` gets `MLXEngine` and should be fine, but
+  `patch("engine.tts.TTSEngine")` in any *untouched* test would now be patching
+  the wrong target — the factory is what handlers call.
+- `engine/result.py`'s `TTSResult` gained an optional `mp3_bytes`. MLX still
+  passes real mp3 bytes, so `.write("x.mp3")` should remain a byte copy with no
+  re-encode. Confirm you're not silently round-tripping through pydub.
+
+### 3. Real MLX narrate job
+
+Run one through the UI — not just the suite. This is the only thing that proves
+the refactor didn't change MLX behaviour, since every test mocks the model.
+Check the output MP3 actually plays and is the right length.
+
+### 4. Restart the launchd agent — last
+
+```bash
+./reset_service.sh restart-only
+```
+
+**Pay attention to this one.** `reset_service.sh` was deleted from the repo
+months ago and has just been recreated; the Mac has never run this version. Its
+`launchctl` path carries a bug fix that matters (commit `44de990`): the old
+`launchctl list | grep -q` idiom silently failed under `set -o pipefail`, which
+would have made every restart skip unloading the agent and leave the old
+process holding port 5151 — the exact "Port conflict" pitfall in CLAUDE.md.
+Confirm the agent really does stop and restart, and that the site comes back.
+
+Kill any manually started `uv run ruru` first.
+
+### 5. Optional, cheap, worth it
+
+A GitHub Actions job running `uv sync && uv run pytest` on `ubuntu-latest`. It
+won't catch MLX runtime regressions, but it catches every "this only imports on
+a Mac" mistake at push time — which is exactly the class of bug this branch was
+built to prevent.
+
+### If the Mac goes wrong
+
+`main` is four commits ahead of where it was. Last known-good commit before
+this work: **`60be0c8`**. The Linux production install at `/8TB/bin/ruru` is
+independent — it tracks its own checkout and won't be affected by anything you
+do to the Mac or to `main`.
+
+---
 
 ### Production install, verified 2026-07-26
 
@@ -181,7 +253,9 @@ Fix this first, so later failures mean something.
       passes alone but fails in a full run — the real `run_generate_tts` runs
       and hits `RuntimeError: Database path not set`. Make it enqueue a stub
       handler (or `set_db_path` to a tmp DB) instead of depending on test order.
-- [x] Verify: `uv run pytest` fully green on **both** Linux and the Mac.
+- [x] Verify on Linux: `uv run pytest` fully green.
+- [ ] Verify on the **Mac**: `uv run pytest` — confirms the `find_spec` gating
+      didn't skip anything that should still run there. See "What's left".
 
 ### Phase 1 — Backend-agnostic refactor — ✅ DONE (Linux; Mac verification pending)
 
@@ -243,9 +317,10 @@ TDD (`superpowers:test-driven-development`). Merge to `main` before Phase 2.
       `MLXEngine`; `=cuda` → `CUDAEngine`; unknown value → clear error.
 - [x] Update `CLAUDE.md` (file layout + config table, plus the stale facts in
       "Corrections" above) and mark `docs/nvidia_feasibility.md` §5 implemented.
-- [x] Verify on the Mac: `uv run pytest`, a real end-to-end narrate job through
-      the UI, then restart the launchd agent. Merge to `main` only after that.
-      (Kill any manually started `uv run ruru` first — known port conflict.)
+- [ ] **Not yet done** — verify on the Mac: `uv run pytest`, a real end-to-end
+      narrate job through the UI, then restart the launchd agent. (Kill any
+      manually started `uv run ruru` first — known port conflict.) See
+      "What's left".
 
 ### Phase 2 — `CUDAEngine` on the Linux clone — ✅ DONE
 
