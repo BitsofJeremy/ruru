@@ -187,3 +187,30 @@ class TestGenerationReturnsAContractingResult:
         with patch.object(engine, "_load_design"):
             engine._design_model = model
             self._assert_contract(engine.generate_design("hi", "a warm voice"), tmp_path)
+
+
+class TestCUDAOfflineModelResolution:
+    """A cached model must load with no network.
+
+    qwen_tts wraps `AutoModel.from_pretrained(repo_id)`, which hits
+    huggingface.co on every load — so an outage took TTS down even though all
+    the weights were on disk. CUDAEngine resolves the repo to its local
+    snapshot path first.
+    """
+
+    @pytest.mark.skipif(find_spec("qwen_tts") is None, reason="qwen_tts not installed")
+    def test_uses_cached_snapshot_path_when_available(self):
+        cuda_engine = pytest.importorskip("engine.cuda_engine")
+        with patch(
+            "huggingface_hub.snapshot_download", return_value="/cache/snap"
+        ) as dl:
+            assert cuda_engine.CUDAEngine._resolve_model_path("Qwen/whatever") == "/cache/snap"
+        # local_files_only is the whole point — without it this still calls out.
+        assert dl.call_args.kwargs.get("local_files_only") is True
+
+    @pytest.mark.skipif(find_spec("qwen_tts") is None, reason="qwen_tts not installed")
+    def test_falls_back_to_repo_id_when_not_cached(self):
+        """A first-time download must still work."""
+        cuda_engine = pytest.importorskip("engine.cuda_engine")
+        with patch("huggingface_hub.snapshot_download", side_effect=OSError("not cached")):
+            assert cuda_engine.CUDAEngine._resolve_model_path("Qwen/whatever") == "Qwen/whatever"
