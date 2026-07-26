@@ -52,14 +52,14 @@ Plus **one** of:
 
 | Backend | Requirement | Notes |
 |---|---|---|
-| `mlx` | Apple Silicon (M-series), 16 GB+ unified memory recommended | MLX runs on the Apple GPU; the 1.7B 8-bit models peak around ~7 GB |
+| `mlx` | Apple Silicon (M-series), 16 GB+ unified memory recommended | Install with `uv sync --extra mlx`. MLX runs on the Apple GPU; the 1.7B 8-bit models peak around ~7 GB |
 | `cuda` | NVIDIA GPU, ~5 GB free VRAM | Install with `uv sync --extra cuda`. Each bf16 1.7B model is ~4-5 GB; only one is held resident at a time, so a competing GPU workload can still cause an OOM |
 
 ## Quick start
 
 ```bash
 # Apple Silicon
-uv sync
+uv sync --extra mlx
 uv run app.py
 
 # NVIDIA
@@ -69,7 +69,7 @@ RURU_TTS_BACKEND=cuda uv run app.py
 
 Open [http://localhost:5151](http://localhost:5151) in your browser. The sidebar shows which backend is active.
 
-> Install the extra that matches your hardware. `--extra cuda` on a Mac would pull in torch and `qwen-tts` needlessly; the MLX packages are already platform-gated to macOS and are skipped elsewhere automatically.
+> Install the extra that matches your hardware — plain `uv sync` installs neither backend. `mlx` and `cuda` are declared mutually exclusive in `pyproject.toml` (`[tool.uv] conflicts`) so `uv lock` resolves each independently instead of forcing `qwen-tts`'s `transformers==4.57.3` pin onto the Mac's resolution, which used to silently downgrade `mlx-audio` to a version without Qwen3-TTS support at all.
 
 ## Production deployment (macOS)
 

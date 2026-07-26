@@ -214,3 +214,34 @@ class TestCUDAOfflineModelResolution:
         cuda_engine = pytest.importorskip("engine.cuda_engine")
         with patch("huggingface_hub.snapshot_download", side_effect=OSError("not cached")):
             assert cuda_engine.CUDAEngine._resolve_model_path("Qwen/whatever") == "Qwen/whatever"
+
+
+class TestMLXHasQwen3TTSArchitecture:
+    """Guard against the next silent mlx-audio downgrade.
+
+    `qwen-tts==0.1.1` (pulled in by the `cuda` extra) hard-pins
+    `transformers==4.57.3`. Without `mlx`/`cuda` declared as conflicting
+    extras in pyproject.toml, `uv`'s single universal lock forces that pin
+    onto the Mac's resolution too, silently backtracking `mlx-audio` to
+    0.2.10 — the last release before `mlx_audio/tts/models/qwen3_tts/`
+    existed. Without that module, `mlx_audio.tts.utils.get_model_and_args`
+    resolves `model_type: qwen3_tts` down to the unrelated `qwen3`
+    (Orpheus/SNAC) architecture, and every real MLX generation call dies
+    with `TypeError: ModelConfig.__init__() missing 11 required positional
+    arguments`.
+
+    The rest of this suite mocks `load_model`/`generate_audio` and stays
+    green even when this is broken — that's exactly how the bug shipped
+    silently. This test imports the real architecture module: cheap
+    (no model download, no GPU), and it fails the moment mlx-audio
+    regresses below the version that carries Qwen3-TTS support.
+    """
+
+    @pytest.mark.skipif(find_spec("mlx_audio") is None, reason="mlx_audio not installed")
+    def test_qwen3_tts_architecture_module_importable(self):
+        assert find_spec("mlx_audio.tts.models.qwen3_tts") is not None, (
+            "mlx-audio is installed but lacks mlx_audio.tts.models.qwen3_tts — "
+            "this is the exact silent-downgrade bug fixed by declaring the "
+            "'mlx' and 'cuda' pyproject extras as conflicting. Check "
+            "`uv.lock` for the resolved mlx-audio version (must be >=0.4.4)."
+        )

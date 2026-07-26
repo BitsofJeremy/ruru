@@ -39,9 +39,33 @@ it on the MacBook in a fresh session. That inverts the usual rule in Phase 4
 ```bash
 cd <ruru repo on the Mac>
 git checkout main && git pull
-uv sync                    # PLAIN. Never `--extra cuda` on the Mac —
-                           # it would try to install torch + qwen-tts.
+uv sync --extra mlx        # NOT plain `uv sync` — that installs no backend.
+                           # Never `--extra cuda` on the Mac; it would try to
+                           # install torch + qwen-tts.
 ```
+
+**Update, 2026-07-26 — the plain-`uv sync` guidance above was itself a live
+bug.** With `mlx`/`mlx-audio` as unconditional (if platform-marked) base
+deps and `qwen-tts` pinning `transformers==4.57.3` under the `cuda` extra,
+`uv`'s single universal lock forced that pin onto the Mac's resolution too,
+silently backtracking `mlx-audio` to **0.2.10** — the last release before
+`mlx_audio/tts/models/qwen3_tts/` existed. A plain `uv sync` on the Mac
+dev checkout reproduced this: real `generate_clone` died with
+`TypeError: ModelConfig.__init__() missing 11 required positional
+arguments`, because without the `qwen3_tts` architecture module,
+`mlx_audio.tts.utils.get_model_and_args` resolves `model_type: qwen3_tts`
+down to the unrelated `qwen3` (Orpheus/SNAC) architecture. The mocked test
+suite stayed green throughout (174 passed, 6 skipped) — it mocks
+`load_model` and cannot catch this.
+
+**Fixed**: `mlx`/`mlx-audio` moved into their own `mlx` extra (floor
+`mlx-audio>=0.4.4`), and `[tool.uv] conflicts = [[{extra="mlx"},
+{extra="cuda"}]]` added so `uv lock` forks the resolution instead of
+intersecting it. Verified: `mlx-audio` now resolves to 0.4.x with
+`qwen3_tts` present, and `transformers` forks to 5.12.1 (MLX) / 4.57.3
+(CUDA) independently. Install commands and CLAUDE.md/README.md updated to
+`uv sync --extra mlx` / `--extra cuda` — plain `uv sync` installs neither
+backend now.
 
 ### 2. Run the suite
 
@@ -120,6 +144,22 @@ print('offline load OK')"
   `TestCUDAOfflineModelResolution` in `tests/test_engine_contract.py`.
 - **If it loads fine**, mlx-audio already falls back to cache. Note that here so
   nobody re-investigates.
+
+**Answered, 2026-07-26 — MLX does NOT have the offline bug. No fix needed.**
+On the dev checkout, post `mlx-audio` 0.4.6 fix:
+```
+HF_HUB_OFFLINE=1 uv run python -c "
+from engine import get_engine_class
+e = get_engine_class('mlx')()
+e._load_clone()
+print('offline load OK')"
+```
+→ `offline load OK`, no exception, no network contacted. `mlx_audio`'s model
+loading already resolves fully from the local HF cache under
+`HF_HUB_OFFLINE=1`. Unlike CUDA's `qwen_tts` (which wraps a bare
+`AutoModel.from_pretrained(repo_id)` that always tries the network first),
+MLX's path doesn't need `CUDAEngine._resolve_model_path` mirrored — this is
+asymmetric between the two backends and that's fine. Nothing to change here.
 
 Either way this is worth doing: ruru is a local-first app, and "no internet"
 should never mean "no speech".
