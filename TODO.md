@@ -46,12 +46,56 @@ Summary, evidence inline further down:
 
 ---
 
-## NEXT — pick up here on the Linux box
+## DONE — the Linux catch-up landed, 2026-07-26 (evening)
 
-The Mac is done and `main` is at `596f0a0`. Linux has **not** pulled this yet:
-`http://ruru.nexus.home.test/` is currently serving **v0.5.0 on the CUDA
+Both Linux clones are now at `0346859`. Nothing outstanding on this box; the
+section below is kept as the record of what was run.
+
+- **Dev clone** (`~/Documents/current_projects/ai_speech/ruru`): already at
+  `0346859` via Syncthing. `uv sync --extra cuda` → `uv run pytest` →
+  **176 passed, 5 skipped**.
+- **Production clone** (`/8TB/bin/ruru`): `213f5af` → `git pull` → `0346859`.
+  `uv sync --extra cuda` reinstalled only `ruru` itself (0.0.3 → 0.5.0) and
+  left `torch` / `qwen_tts` in place — verified explicitly afterwards
+  (`torch 2.13.0+cu130`, `cuda True`, `qwen_tts` imports). `uv run pytest` →
+  **176 passed, 5 skipped** — the new Linux baseline, replacing 167/4. No
+  `test_voice_seed.py` failures: this clone carries no local
+  `characters_data.py`, exactly as predicted.
+- **Real (non-mocked) CUDA generation** from the production clone, with the
+  service stopped so the 1.7B model had the VRAM: `generate_clone` off
+  `voice_clones/.mp3` → a valid 3.52 s MP3 (24 kHz mono, 128 kbps).
+- **Restart**: `systemctl stop` → verify → `systemctl start` (plain, not
+  `reset_service.sh restart-only` — the service was already down and there was
+  no reason to invoke the state-clearing path). New PID 263797, active.
+- **Verified after restart**: `http://ruru.nexus.home.test/` → 200; `/api/voices`
+  → still **13 voices**; sidebar reads **CUDA** and **v0.5.0**; no errors in the
+  journal on the first generation.
+- **Full narrate job end to end through nginx**: a 3-paragraph document →
+  1 chunk → a 17.04 s MP3 normalized to max −3.43 dBFS, downloadable through
+  the `/audio/output/` alias (273,836 bytes, `audio/mpeg`).
+
+Two small things worth knowing next time:
+
+- `POST /api/narrate`'s file field is **`document`**, not `file` (`app.py:733`).
+  Posting `file=@…` returns a 400 `No document uploaded.`
+- The `jobs` table has **`error_message`**, not `error`. A polling loop selecting
+  `error` fails with `no such column` on every iteration while the job quietly
+  succeeds.
+
+The GPU had 5.5 GB in use before this: 4.5 GB held by the running `ruru`
+service (a model left resident from an earlier job — freed by the restart) and
+784 MB by an unrelated container.
+
+Still not done: §6 CI (optional, never attempted).
+
+---
+
+## The original Linux catch-up instructions — completed, kept for reference
+
+The Mac is done and `main` was at `596f0a0`. Linux had **not** pulled this yet:
+`http://ruru.nexus.home.test/` was serving **v0.5.0 on the CUDA
 backend**, healthy, from whatever commit it installed at (`213f5af` or
-earlier). Nothing is broken — this is a routine catch-up, with **one hazard**.
+earlier). Nothing was broken — a routine catch-up, with **one hazard**.
 
 ### ⚠️ The one thing that will break the service
 
