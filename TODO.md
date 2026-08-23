@@ -46,6 +46,39 @@ Summary, evidence inline further down:
 
 ---
 
+## DONE — Linux rollout of 0.5.1, 2026-08-23
+
+Both Linux clones are now at `eeea4e4` (v0.5.1 — the `job_delete` disk-sweep
+release). Nothing outstanding on this box.
+
+- **Dev clone**: `uv sync --extra cuda` → `uv run pytest` → **180 passed,
+  5 skipped** (the new baseline; `f3dfcbf` added the job-delete route tests).
+- **Production clone** (`/8TB/bin/ruru`): `0346859` → `git pull` → `eeea4e4`.
+  `uv sync --extra cuda` reinstalled only `ruru` (0.5.0 → 0.5.1); `torch
+  2.13.0+cu130` / CUDA verified intact afterwards. Suite → **180/5**, matching
+  dev.
+- **Real generation quirk**: the first clone-side `generate_clone` (service
+  stopped, pre-reboot) produced a valid but runaway 655 s MP3 — the model never
+  emitted EOS. `engine/cuda_engine.py` is unchanged since the verified-good
+  July run, so a sampling/state fluke, not a code regression. After the user
+  rebooted the box, an end-to-end narrate job through nginx produced a normal
+  23.2 s MP3 for a 3-paragraph doc. If runaways recur, look at a max-length
+  cap in the CUDA engine.
+- **Service**: rebooted mid-rollout (deliberate, to clear GPU/memory state);
+  `ruru-web` auto-started on the new code — new PID, port 5151, journal clean.
+  Site → 200 through nginx, sidebar **CUDA · v0.5.1**, 13 voices.
+- **The actual point of the release, verified live**: `POST /api/narrate`
+  (field `document`) → completed → `DELETE /api/jobs/{id}` removed the DB row,
+  `cache/output/narrate_<id>.mp3`, `cache/chunks/job_<id>/`, **and** the
+  uploaded source doc. Swept the pre-fix orphans by hand afterwards (chunk
+  dirs `job_4/5/6/10`, six stale uploads) — `chunks/` and `uploads/` are now
+  empty.
+- One noted edge case (harmless, not fixed): two jobs uploading the *same
+  filename* share one `uploads/<name>` path; deleting either job unlinks the
+  file while the other job's row still references it.
+
+---
+
 ## DONE — the Linux catch-up landed, 2026-07-26 (evening)
 
 Both Linux clones are now at `0346859`. Nothing outstanding on this box; the
