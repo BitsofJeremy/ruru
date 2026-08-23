@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import sys
 from contextlib import contextmanager
@@ -524,7 +525,6 @@ HITCHHIKERS_QUOTES = [
 async def voice_preview(voice_id: int):
     """Generate a short sample clip for a designed voice using a random HHGTTG quote."""
     import random
-    import shutil
 
     async with get_async_session() as session:
         from models.db import Voice, Job
@@ -839,8 +839,28 @@ async def job_delete(job_id: int):
                 "<p class='text-red-500 text-sm'>Cannot delete a queued or running job.</p>",
                 status_code=400,
             )
+        # --- on-disk artifacts (run BEFORE the row goes, while we still
+        # --- have job.output_path / job.source_path in hand) ---
         if job.output_path:
             Path(job.output_path).unlink(missing_ok=True)
+        # Per-chunk WAVs: narrate jobs write chunks/job_<id>/chunk_*.wav.
+        # Never raises — a missing dir is the common case (short TTS jobs
+        # don't chunk).
+        chunk_dir = CHUNK_DIR / f"job_{job_id}"
+        if chunk_dir.is_dir():
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+        # Uploaded source document. CAREFUL: for /api/tts/generate jobs,
+        # source_path is the raw TEXT, not a filesystem path — resolve()
+        # against the upload dir and is_file() both guard that (raw text
+        # won't resolve under UPLOAD_DIR).
+        src = Path(job.source_path)
+        if src.is_absolute():
+            upload_file = src.resolve() if src.is_file() else None
+        else:
+            upload_file = None
+        if upload_file is not None and upload_file.is_relative_to(UPLOAD_DIR.resolve()):
+            upload_file.unlink(missing_ok=True)
+
         await session.execute(sqlalchemy.delete(Chapter).where(Chapter.job_id == job_id))
         await session.delete(job)
         await session.commit()
