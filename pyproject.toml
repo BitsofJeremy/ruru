@@ -1,6 +1,6 @@
 [project]
 name = "ruru"
-version = "0.5.0"
+version = "0.5.1"
 description = "ruru - MLX Version: audiobook narration engine powered by Qwen3-TTS running locally on Apple Silicon via MLX"
 requires-python = ">=3.10"
 dependencies = [
