@@ -1,4 +1,6 @@
 """Tests for job routes."""
+from pathlib import Path
+
 import pytest
 
 
@@ -79,3 +81,67 @@ class TestJobDelete:
         response = client.delete(f"/api/jobs/{job_id}")
         assert response.status_code == 200
         assert not output_file.exists()
+
+
+class TestJobDeleteDiskSweep:
+    """job_delete must sweep chunks/job_<id>/ and the uploaded source file."""
+
+    def _make_job(self, source_path, output_path=None):
+        from models.db import Job, get_sync_session
+
+        with next(get_sync_session()) as session:
+            job = Job(
+                title="Sweep me",
+                voice_id=None,
+                status="completed",
+                source_path=source_path,
+                output_path=output_path,
+            )
+            session.add(job)
+            session.commit()
+            return job.id
+
+    def test_delete_removes_chunk_dir(self, client, seeded_db):
+        import app as app_module
+
+        job_id = self._make_job(source_path="narrated text")
+        chunk_dir = Path(app_module.CHUNK_DIR) / f"job_{job_id}"
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        (chunk_dir / "chunk_000.wav").write_bytes(b"fake wav")
+
+        response = client.delete(f"/api/jobs/{job_id}")
+        assert response.status_code == 200
+        assert not chunk_dir.exists()
+
+    def test_delete_removes_upload_file(self, client, seeded_db):
+        import app as app_module
+
+        upload_dir = Path(app_module.UPLOAD_DIR)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        upload_file = upload_dir / "note-test.txt"
+        upload_file.write_bytes(b"source doc")
+
+        job_id = self._make_job(source_path=str(upload_file))
+
+        response = client.delete(f"/api/jobs/{job_id}")
+        assert response.status_code == 200
+        assert not upload_file.exists()
+
+    def test_delete_skips_raw_text_source_path(self, client, seeded_db):
+        """Quick-TTS jobs store literal text in source_path — delete must not choke."""
+        job_id = self._make_job(source_path="Hello there, this is raw spoken text.")
+
+        response = client.delete(f"/api/jobs/{job_id}")
+        assert response.status_code == 200
+
+    def test_delete_never_unlinks_outside_upload_dir(self, client, seeded_db, tmp_path):
+        """An absolute path that exists but is NOT under UPLOAD_DIR must survive."""
+        outside = tmp_path / "elsewhere" / "victim.txt"
+        outside.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_bytes(b"do not delete me")
+
+        job_id = self._make_job(source_path=str(outside))
+
+        response = client.delete(f"/api/jobs/{job_id}")
+        assert response.status_code == 200
+        assert outside.exists()
