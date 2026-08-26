@@ -4,7 +4,6 @@ import sqlite3
 from models.scan_voice_clones import scan_voice_clones
 
 import pytest
-from pathlib import Path
 
 
 VOICE_COLUMNS = """CREATE TABLE voices (
@@ -134,3 +133,13 @@ def test_does_not_clobber_hand_edited_description(db, dirs):
     row = _voices(db)[0]
     assert row["name"] == "My Gus"
     assert row["description"] == "hand edited"
+
+
+def test_undecodable_prompt_file_is_skipped(db, dirs):
+    clones, voices = dirs
+    _write_voice(clones, "ruth")
+    (clones / "ruth.prompt.txt").write_bytes(b"Ruth \xff\xfe bad bytes")
+    assert scan_voice_clones(db, clones, voices) == 1
+    row = _voices(db)[0]
+    assert row["name"] == "Ruth"
+    assert row["description"] == ""
