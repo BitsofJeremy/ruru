@@ -58,7 +58,20 @@ def scan_voice_clones(db_path, clones_dir, voice_dir) -> int:
         for af, tf in pairs:
             ns = _normalize_stem(af.name)
             slug = re.sub('[^a-z0-9]+','-',ns).strip('-')
-            if slug in seen: continue
+            if slug in seen:
+                # Backfill legacy imports that predate .prompt.txt support.
+                row = cur.execute(
+                    "SELECT id, description FROM voices WHERE slug=?", (slug,)
+                ).fetchone()
+                if row and not row[1] and ns in prompts:
+                    parsed = _parse_prompt(prompts[ns])
+                    if parsed:
+                        p_name, p_title, p_para = parsed
+                        p_desc = f"{p_title} — {p_para}" if p_title else p_para
+                        cur.execute(
+                            "UPDATE voices SET name=?, description=?, speaking_style=? WHERE id=?",
+                            (p_name, p_desc, p_title, row[0]))
+                continue
             parsed = _parse_prompt(prompts[ns]) if ns in prompts else None
             if parsed:
                 name, title, para = parsed
