@@ -143,3 +143,42 @@ def test_undecodable_prompt_file_is_skipped(db, dirs):
     row = _voices(db)[0]
     assert row["name"] == "Ruth"
     assert row["description"] == ""
+
+
+def _seed_ui_voice(db, name="Gus Guy", slug="gus-guy"):
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO voices (name,slug,voice_type,description) VALUES (?,?,?,?)",
+        (name, slug, "cloned", "added via the UI"),
+    )
+    conn.commit(); conn.close()
+
+
+def test_name_match_skips_ui_created_clone(db, dirs):
+    clones, voices = dirs
+    _seed_ui_voice(db)
+    _write_voice(clones, "gus", GUS_PROMPT)
+    assert scan_voice_clones(db, clones, voices) == 0
+    rows = _voices(db)
+    assert len(rows) == 1
+    assert rows[0]["slug"] == "gus-guy"
+    assert rows[0]["description"] == "added via the UI"
+    assert not list(voices.iterdir())  # nothing copied
+
+
+def test_name_match_is_case_insensitive(db, dirs):
+    clones, voices = dirs
+    _seed_ui_voice(db, name="gus guy", slug="gus-guy")
+    _write_voice(clones, "gus", GUS_PROMPT)
+    assert scan_voice_clones(db, clones, voices) == 0
+    assert len(_voices(db)) == 1
+
+
+def test_new_voice_still_imports_alongside_name_matched_one(db, dirs):
+    clones, voices = dirs
+    _seed_ui_voice(db)
+    _write_voice(clones, "gus", GUS_PROMPT)
+    _write_voice(clones, "mabel", "Mabel Marsh\n\nDry Wit - A wry older woman's voice.\n")
+    assert scan_voice_clones(db, clones, voices) == 1
+    slugs = {row["slug"] for row in _voices(db)}
+    assert slugs == {"gus-guy", "mabel"}

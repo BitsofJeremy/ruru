@@ -54,26 +54,30 @@ def scan_voice_clones(db_path, clones_dir, voice_dir) -> int:
     conn = sqlite3.connect(db_path); cur = conn.cursor()
     n = 0
     try:
-        cur.execute("SELECT slug FROM voices")
-        seen = {r[0] for r in cur.fetchall()}
+        cur.execute("SELECT slug, name FROM voices")
+        seen = set(); by_name = set()
+        for r in cur.fetchall():
+            seen.add(r[0]); by_name.add((r[1] or '').lower())
         for af, tf in pairs:
             ns = _normalize_stem(af.name)
             slug = re.sub('[^a-z0-9]+','-',ns).strip('-')
+            parsed = _parse_prompt(prompts[ns]) if ns in prompts else None
             if slug in seen:
                 # Backfill legacy imports that predate .prompt.txt support.
                 row = cur.execute(
                     "SELECT id, description FROM voices WHERE slug=?", (slug,)
                 ).fetchone()
-                if row and not row[1] and ns in prompts:
-                    parsed = _parse_prompt(prompts[ns])
-                    if parsed:
-                        p_name, p_title, p_para = parsed
-                        p_desc = f"{p_title} — {p_para}" if p_title else p_para
-                        cur.execute(
-                            "UPDATE voices SET name=?, description=?, speaking_style=? WHERE id=?",
-                            (p_name, p_desc, p_title, row[0]))
+                if row and not row[1] and parsed:
+                    p_name, p_title, p_para = parsed
+                    p_desc = f"{p_title} — {p_para}" if p_title else p_para
+                    cur.execute(
+                        "UPDATE voices SET name=?, description=?, speaking_style=? WHERE id=?",
+                        (p_name, p_desc, p_title, row[0]))
                 continue
-            parsed = _parse_prompt(prompts[ns]) if ns in prompts else None
+            # UI-created clones are slugged from the persona NAME, so the stem
+            # slug won't match — fall back to a case-insensitive name match.
+            if parsed and parsed[0].lower() in by_name:
+                continue
             if parsed:
                 name, title, para = parsed
                 description = f"{title} — {para}" if title else para
