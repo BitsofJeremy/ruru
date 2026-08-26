@@ -96,3 +96,41 @@ def test_prompt_without_separator_whole_body_is_description(db, dirs):
     assert row["name"] == "Wesley Wilder"
     assert row["description"] == "Just a paragraph, no separator."
     assert row["speaking_style"] == ""
+
+
+def test_rescan_does_not_duplicate_or_alter(db, dirs):
+    clones, voices = dirs
+    _write_voice(clones, "gus", GUS_PROMPT)
+    scan_voice_clones(db, clones, voices)
+    first = _voices(db)[0]
+    assert scan_voice_clones(db, clones, voices) == 0
+    assert len(_voices(db)) == 1
+    assert _voices(db)[0] == first
+
+
+def test_backfills_row_with_empty_description(db, dirs):
+    clones, voices = dirs
+    _write_voice(clones, "gus", GUS_PROMPT)
+    scan_voice_clones(db, clones, voices)
+    # Simulate a legacy import: wipe the character data but keep the row.
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE voices SET name='gus', description='', speaking_style=''")
+    conn.commit(); conn.close()
+    assert scan_voice_clones(db, clones, voices) == 0  # backfill isn't a new import
+    row = _voices(db)[0]
+    assert row["name"] == "Gus Guy"
+    assert row["description"].startswith("Warm Ordinary Everyman — A middle-aged")
+    assert row["speaking_style"] == "Warm Ordinary Everyman"
+
+
+def test_does_not_clobber_hand_edited_description(db, dirs):
+    clones, voices = dirs
+    _write_voice(clones, "gus", GUS_PROMPT)
+    scan_voice_clones(db, clones, voices)
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE voices SET name='My Gus', description='hand edited'")
+    conn.commit(); conn.close()
+    scan_voice_clones(db, clones, voices)
+    row = _voices(db)[0]
+    assert row["name"] == "My Gus"
+    assert row["description"] == "hand edited"
