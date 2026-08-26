@@ -18,7 +18,7 @@ Two interchangeable GPU backends, selected with `RURU_TTS_BACKEND`:
 
 Everything above the engine — jobs, database, routes, templates — is shared. Both backends satisfy one interface (`engine/base.py`), enforced by a contract test suite that runs on either platform.
 
-ruru is a single-user web application built with FastAPI and HTMX. It ships with one pre-seeded default voice (), and supports creating new voices via voice cloning or voice design. (-style character-voice bulk seeding is an optional, local-only feature for developers who supply their own `characters_data.py` — it is not part of the public release.)
+ruru is a single-user web application built with FastAPI and HTMX. It ships with five example voices — **Gus**, **Mabel**, **Ruth**, **Vera**, and **Wesley**, a cast of callers and archivists from a late-night radio show about the impossible — and supports creating new voices via voice cloning or voice design. (-style character-voice bulk seeding is an optional, local-only feature for developers who supply their own `characters_data.py` — it is not part of the public release.)
 
 The name is a nod to ruru, the morepork owl — known for its distinctive two-note night call, fitting for a tool that runs overnight turning books into audio.
 
@@ -150,7 +150,7 @@ pyproject.toml       # Dependencies and uv settings
 install_macos.sh     # Production install: launchd agent + nginx (idempotent)
 install_linux.sh     # Production install: systemd unit + nginx (idempotent)
 reset_service.sh     # Restart / clean / reset-db helper (launchd or systemd)
-voice_clones/        # Default voice reference audio (.mp3 + .txt)
+voice_clones/        # Example voices: audio + transcript + design prompt per voice
 jobs/
   models.py          # Job state machine (pending/running/completed/failed)
   queue.py           # In-process asyncio job runner
@@ -158,7 +158,7 @@ jobs/
 models/
   db.py              # SQLAlchemy models + schema (voices, jobs, chapters)
   seed_voices.py     # Optional  character voice seeding (local-only)
-  scan_voice_clones.py # Seeds the default  voice from voice_clones/ on startup
+  scan_voice_clones.py # Imports every voice_clones/ audio+transcript pair on startup
   import_voices.py   # Migrate a voice library from another install
 engine/
   __init__.py        # get_engine_class() — backend factory (RURU_TTS_BACKEND)
@@ -211,6 +211,20 @@ Browser (HTMX) ──> FastAPI (port 5151) ──> SQLite (jobs, voices)
   - **Voice design** — create a voice from a text description alone
 - **SQLite** stores voice metadata, job state, and chapter info. Audio files live on the filesystem.
 
+## Bundled example voices
+
+Five character voices ship in `voice_clones/` and are imported into the library on first startup. Each is a `.mp3` reference clip + matching `.txt` transcript (the clone pair) plus a `.prompt.txt` design prompt describing the persona.
+
+| Voice | Persona | Character of the voice |
+|---|---|---|
+| **Gus** | Warm Ordinary Everyman | Middle-aged American man, mid-register, unpolished — a bewildered but decent neighbor recounting something impossible |
+| **Mabel** | Bright Young Adult Caller | Early-20s, quick and hushed, delivering unsettling observations with the calm pride of someone who brought notes |
+| **Ruth** | Dry Wry Archivist | Older woman, low and precise, deadpan — a librarian of the impossible who knows more than she'll say |
+| **Vera** | Sharp Wry Skeptic | Early-40s, clipped and analytical, allergic to mysticism, composing the footnote that will disprove you in real time |
+| **Wesley** | Open Hearted Believer | Late-20s man, warm and rapid, mall-kiosk tech energy, homesick for places he's never been |
+
+Drop your own audio + transcript pair into `voice_clones/` to seed additional voices the same way.
+
 ## Voice creation
 
 ### Voice design (no audio needed)
@@ -247,8 +261,8 @@ uv run python -c "
 from engine import get_engine_class
 e = get_engine_class()()
 e.generate_clone('Testing one two three',
-                 'voice_clones/.mp3',
-                 'voice_clones/.txt').write('/tmp/check.mp3')"
+                 'voice_clones/vera.mp3',
+                 'voice_clones/vera.txt').write('/tmp/check.mp3')"
 ```
 
 `tests/test_engine_contract.py::TestMLXHasQwen3TTSArchitecture` guards the specific regression above by importing the real architecture module — cheap, no GPU — but it can only cover what a static import can see.
