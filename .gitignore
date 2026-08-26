@@ -1,3 +1,7 @@
+voice_clones/lilith.mp3
+voice_clones/lilith.prompt.txt
+voice_clones/lilith.txt
+
 # Python
 __pycache__/
 *.pyc
