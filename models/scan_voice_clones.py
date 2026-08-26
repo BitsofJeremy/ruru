@@ -18,11 +18,34 @@ def _pair_files(audio_files, text_files):
                 pairs.append((af, tf)); break
     return pairs
 
+def _parse_prompt(prompt_path):
+    """Parse a .prompt.txt into (display_name, persona_title, paragraph).
+
+    Format: line 1 is the display name; the body is a single paragraph
+    beginning 'Persona Title - description...'. Returns None for empty or
+    unreadable files. persona_title is '' when no ' - ' separator exists.
+    """
+    try:
+        text = prompt_path.read_text(encoding='utf-8').strip()
+    except OSError:
+        return None
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return None
+    name = lines[0]
+    body = ' '.join(lines[1:])
+    if ' - ' in body:
+        title, paragraph = body.split(' - ', 1)
+        return name, title.strip(), paragraph.strip()
+    return name, '', body
+
 def scan_voice_clones(db_path, clones_dir, voice_dir) -> int:
     if not clones_dir.exists(): return 0
-    audio, text = [], []
+    audio, text, prompts = [], [], {}
     for f in clones_dir.iterdir():
         if f.suffix.lower() in {'.mp3','.wav'}: audio.append(f)
+        elif f.name.lower().endswith('.prompt.txt'):
+            prompts[_normalize_stem(f.name[:-len('.prompt.txt')])] = f
         elif f.suffix.lower() == '.txt': text.append(f)
     if not audio: return 0
     pairs = _pair_files(audio, text)
@@ -34,14 +57,20 @@ def scan_voice_clones(db_path, clones_dir, voice_dir) -> int:
         seen = {r[0] for r in cur.fetchall()}
         for af, tf in pairs:
             ns = _normalize_stem(af.name)
-            slug = re.sub(r'[^a-z0-9]+','-',ns).strip('-')
+            slug = re.sub('[^a-z0-9]+','-',ns).strip('-')
             if slug in seen: continue
+            parsed = _parse_prompt(prompts[ns]) if ns in prompts else None
+            if parsed:
+                name, title, para = parsed
+                description = f"{title} — {para}" if title else para
+            else:
+                name, title, description = ns.replace('-',' ').title(), '', ''
             vs = f"{slug}_clone"
             ad = voice_dir / f"{vs}{af.suffix}"; td = voice_dir / f"{vs}.txt"
             with open(af,'rb') as s, open(ad,'wb') as d: d.write(s.read())
             with open(tf,'r') as s, open(td,'w') as d: d.write(s.read())
             cur.execute("INSERT INTO voices (name,slug,voice_type,ref_audio_path,ref_text,sample_audio_path,speaking_style,emotional_range,description) VALUES (?,?,?,?,?,?,?,?,?)",
-                (ns.replace('-',' ').title(), slug, 'cloned', str(ad.resolve()), str(td.resolve()), str(ad.resolve()), '', '[]', ''))
+                (name, slug, 'cloned', str(ad.resolve()), str(td.resolve()), str(ad.resolve()), title, '[]', description))
             seen.add(slug); n += 1
         conn.commit()
     finally:
