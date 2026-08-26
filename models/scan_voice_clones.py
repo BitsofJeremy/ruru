@@ -22,12 +22,13 @@ def _parse_prompt(prompt_path):
     """Parse a .prompt.txt into (display_name, persona_title, paragraph).
 
     Format: line 1 is the display name; the body is a single paragraph
-    beginning 'Persona Title - description...'. Returns None for empty or
-    unreadable files. persona_title is '' when no ' - ' separator exists.
+    beginning 'Persona Title - description...'. Returns None for empty,
+    unreadable, or undecodable files. persona_title is '' when no ' - '
+    separator exists.
     """
     try:
         text = prompt_path.read_text(encoding='utf-8').strip()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if not lines:
