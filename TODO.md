@@ -46,6 +46,56 @@ Summary, evidence inline further down:
 
 ---
 
+## DONE — Linux rollout of 0.6.0, 2026-08-26
+
+Both Linux clones at `b53a219` (v0.6.0). Prod verified live; one landmine
+defused on the way (history rewrite) and one **upstream bug found** (see
+"Scanner/UI slug mismatch" below).
+
+- **History was rewritten** since 0.5.1 (old `eeea4e4…` → new `482ffad…`
+  hashes; `cuda-backend` force-pushed too). Prod clone showed ahead-26/
+  behind-34 — a plain pull would have merged. Correct move was
+  `git reset --hard origin/main` (tree verified clean, `data/` ignored, the
+  26 "local" commits were just the pre-rewrite ancestors). Dev had already
+  pulled normally.
+- **`reset --hard` deleted `voice_clones/lilith.*`** — `ae57512` untracked
+  them via a tree delete, not `git rm --cached`. Restored by copying from the
+  dev checkout (Syncthing). Lilith stays local-only on both boxes, as
+  intended.
+- **Suites**: dev and prod both **187 passed / 5 skipped** (new baseline —
+  the 0.6.0 voice/prompt commits added 7). `torch 2.13.0+cu130` intact after
+  `uv sync --extra cuda`.
+- **Real generation** (service stopped): 12.7 s wall → 14.9 s clip, 24 kHz
+  mono, no runaway (a 180 s `timeout` + duration assert is now part of the
+  check).
+- **Verified live through nginx**: 200, sidebar **CUDA · v0.6.0**,
+  end-to-end narrate job (11.8 s MP3), `DELETE /api/jobs/{id}` sweeps chunk
+  dir + upload + row. Journal clean.
+
+### Scanner/UI slug mismatch — duplicates voices on restart (OPEN BUG)
+
+`scan_voice_clones()` slugs from the **audio filename stem** (`gus.mp3` →
+`gus`, ref copied as `gus_clone.mp3`), but the web-UI clone flow slugs from
+the **persona name** (`Gus Guy` → `gus-guy`, ref `gus-guy_ref.mp3`). The five
+example voices had been UI-cloned on Linux before 0.6.0, so the first 0.6.0
+startup re-imported all five as duplicates (13 → 23 voices, every example
+voice ×2).
+
+**Interim fix applied on Linux prod (2026-08-26):** deleted the five
+scanner-format rows (no jobs referenced them; DB backed up to
+`data/ruru.db.bak-0.6.0-dedupe` first) and re-slugged the UI rows to the
+scanner's stems (`gus-guy` → `gus`, …) so the scanner now sees its slug in
+`seen` and skips. Restart-stable: 18 voices, no dupes. Job references and
+`.prompt.txt` descriptions intact.
+
+**Proper fix (not done):** the scanner should match an existing voice by
+something stable (ref-audio content/path or name) rather than assuming its
+own slug format is the only one — or `voice_add` should adopt the scanner's
+stem-based slug. Any UI-cloned voice whose stem ≠ persona name will hit this
+on the Mac too.
+
+---
+
 ## DONE — Linux rollout of 0.5.1, 2026-08-23
 
 Both Linux clones are now at `eeea4e4` (v0.5.1 — the `job_delete` disk-sweep
