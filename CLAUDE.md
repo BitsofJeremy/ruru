@@ -248,7 +248,7 @@ See `docs/uninstall.md` for step-by-step teardown instructions.
 
 ## Character Data
 
-Voices come from `voice_clones/` — an audio file plus a same-stem `.txt` transcript (e.g. `lilith.mp3` + `lilith.txt`), imported into the library on startup by `models/scan_voice_clones.py`.
+Voices come from `voice_clones/` — an audio file plus a same-stem `.txt` transcript (e.g. `vera.mp3` + `vera.txt`), imported into the library on startup by `models/scan_voice_clones.py`. Five example voices ship in the repo (gus, mabel, ruth, vera, wesley); Lilith is local-only (gitignored).
 
 The Ephergent characters are optional: `seed_voices.py` imports `characters_data.py` from `RURU_EPHERGENT_REPO` if it's there, and is a **no-op when it isn't** (neither `characters_data.py` nor `ephergent_voices/` ship with this repo).
 

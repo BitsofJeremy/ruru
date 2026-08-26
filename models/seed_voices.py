@@ -4,7 +4,7 @@ Ephergent character seeding is an OPTIONAL, local-only feature: the public
 repo does not ship `characters_data.py` or `ephergent_voices/*.wav` (they
 contain a private fiction project's character profiles/audio). When that
 module isn't present, `seed_voices()` simply skips ephergent seeding rather
-than raising — the app's actual default voice (lilith) is seeded separately
+than raising — the bundled example voices are seeded separately
 via `models.scan_voice_clones`.
 """
 import json
