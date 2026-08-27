@@ -287,3 +287,6 @@ Together they mean a backend developed on one machine can be trusted to drop int
 ## License
 
 GNU AFFERO GENERAL PUBLIC LICENSE
+## Contributors
+
+- [ephergent](https://github.com/ephergent) — Linux build testing and the CUDA backend
