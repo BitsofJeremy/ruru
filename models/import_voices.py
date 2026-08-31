@@ -105,6 +105,11 @@ def import_voices(source_db: Path, source_dir: Path, db_path: Path, voice_dir: P
             )
             existing.add(slug)
             imported += 1
+            # An explicit import overrides an earlier UI delete.
+            try:
+                dst.execute("DELETE FROM deleted_voice_slugs WHERE slug=?", (slug,))
+            except sqlite3.OperationalError:
+                pass  # table absent — nothing tombstoned
             print(f"  import {slug:<16} ({row['voice_type']})")
 
         dst.commit()
