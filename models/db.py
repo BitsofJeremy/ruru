@@ -42,6 +42,20 @@ class Voice(Base):
     image_path: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
+class DeletedVoiceSlug(Base):
+    """Tombstone for a voice the user deliberately deleted.
+
+    scan_voice_clones() and seed_voices() re-import anything missing from
+    `voices` on every startup and every Refresh click — without a tombstone a
+    deleted bundled voice resurrects on the next restart. Creating a voice
+    through the UI (or import_voices) clears its tombstone: an explicit add
+    always wins over an earlier delete.
+    """
+    __tablename__ = "deleted_voice_slugs"
+
+    slug: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+
 class Job(Base):
     __tablename__ = "jobs"
 

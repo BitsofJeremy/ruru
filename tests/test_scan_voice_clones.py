@@ -182,3 +182,42 @@ def test_new_voice_still_imports_alongside_name_matched_one(db, dirs):
     assert scan_voice_clones(db, clones, voices) == 1
     slugs = {row["slug"] for row in _voices(db)}
     assert slugs == {"gus-guy", "mabel"}
+
+
+def test_tombstoned_slug_stays_deleted(db, dirs):
+    # Deleting a voice via the UI used to resurrect on the next restart or
+    # Refresh: the scan re-imports any voice whose files remain in
+    # voice_clones/. A row in deleted_voice_slugs marks the delete as
+    # intentional so the scan skips it.
+    clones, voices = dirs
+    _write_voice(clones, "gus", GUS_PROMPT)
+    assert scan_voice_clones(db, clones, voices) == 1
+
+    conn = sqlite3.connect(db)
+    conn.execute("DELETE FROM voices")
+    conn.execute("CREATE TABLE deleted_voice_slugs (slug TEXT PRIMARY KEY)")
+    conn.execute("INSERT INTO deleted_voice_slugs VALUES ('gus')")
+    conn.commit(); conn.close()
+
+    assert scan_voice_clones(db, clones, voices) == 0
+    assert _voices(db) == []
+
+
+def test_tombstone_skips_only_its_own_slug(db, dirs):
+    clones, voices = dirs
+    _write_voice(clones, "gus")
+    _write_voice(clones, "mabel")
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE deleted_voice_slugs (slug TEXT PRIMARY KEY)")
+    conn.execute("INSERT INTO deleted_voice_slugs VALUES ('gus')")
+    conn.commit(); conn.close()
+    assert scan_voice_clones(db, clones, voices) == 1
+    assert [row["slug"] for row in _voices(db)] == ["mabel"]
+
+
+def test_missing_tombstone_table_is_tolerated(db, dirs):
+    # Fresh/legacy DBs created outside init_db have no deleted_voice_slugs
+    # table — the scan must behave exactly as before, not crash.
+    clones, voices = dirs
+    _write_voice(clones, "gus")
+    assert scan_voice_clones(db, clones, voices) == 1

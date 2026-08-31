@@ -38,7 +38,18 @@ def seed_voices(db_path: Path, ephergent_repo: Path, voice_dir: Path):
 
     db = sqlite3.connect(str(db_path))
 
+    # Voices the user deleted via the UI must stay deleted, even though a
+    # restart re-runs this seed. (Table absent on fresh/legacy DBs.)
+    try:
+        tombstoned = {
+            r[0] for r in db.execute("SELECT slug FROM deleted_voice_slugs").fetchall()
+        }
+    except sqlite3.OperationalError:
+        tombstoned = set()
+
     for slug, char in EPHERGENT_CHARACTERS.items():
+        if slug in tombstoned:
+            continue
         row = db.execute("SELECT id FROM voices WHERE slug=?", (slug,)).fetchone()
 
         ref_src = ephergent_repo / char.ref_audio_path

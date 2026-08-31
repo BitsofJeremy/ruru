@@ -176,6 +176,13 @@ async def _unique_slug(name: str, session) -> str:
         n += 1
         candidate = f"{base}-{n}"
 
+async def _clear_slug_tombstone(slug: str, session) -> None:
+    """Creating a voice via the UI overrides an earlier delete of that slug."""
+    from models.db import DeletedVoiceSlug
+    await session.execute(
+        sqlalchemy.delete(DeletedVoiceSlug).where(DeletedVoiceSlug.slug == slug)
+    )
+
 # =============================================================================
 # Routes: Root / Admin
 # =============================================================================
@@ -404,11 +411,13 @@ async def voice_design(request: Request):
 
     async with get_async_session() as session:
         from models.db import Voice
+        slug = await _unique_slug(name, session)
+        await _clear_slug_tombstone(slug, session)
         new_voice = Voice(
             name=name,
             voice_type="designed",
             description=description,
-            slug=await _unique_slug(name, session),
+            slug=slug,
         )
         session.add(new_voice)
         await session.commit()
@@ -429,6 +438,7 @@ async def voice_clone(request: Request):
     async with get_async_session() as session:
         from models.db import Voice
         slug = await _unique_slug(name, session)
+        await _clear_slug_tombstone(slug, session)
         suffix = Path(ref_audio.filename).suffix or ".wav"
         saved_path = VOICE_DIR / f"{slug}_ref{suffix}"
         saved_path.write_bytes(await ref_audio.read())
@@ -491,7 +501,7 @@ async def voice_update(voice_id: int, request: Request):
 @app.delete("/api/voices/{voice_id}")
 async def voice_delete(voice_id: int):
     async with get_async_session() as session:
-        from models.db import Voice, Job
+        from models.db import Voice, Job, DeletedVoiceSlug
         voice = await session.get(Voice, voice_id)
         if not voice:
             return HTMLResponse("Voice not found", status_code=404)
@@ -501,6 +511,10 @@ async def voice_delete(voice_id: int):
         await session.execute(
             sqlalchemy.update(Job).where(Job.voice_id == voice_id).values(voice_id=None)
         )
+        # Tombstone the slug: the startup scan and Refresh re-import anything
+        # from voice_clones/ (and seed_voices re-imports Ephergent characters)
+        # whose row is missing — without this the voice resurrects on restart.
+        session.add(DeletedVoiceSlug(slug=voice.slug))
         await session.delete(voice)
         await session.commit()
     return HTMLResponse("", headers={"HX-Redirect": "/voices"})

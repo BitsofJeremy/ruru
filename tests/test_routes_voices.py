@@ -119,6 +119,33 @@ class TestVoiceDelete:
         response = client.get("/voices")
         assert b'hx-delete="/api/voices/1"' in response.content
 
+    def test_delete_tombstones_slug(self, client, seeded_db):
+        # Deleting used not to stick: the startup scan and the Refresh button
+        # re-imported any voice whose files remain in voice_clones/. The delete
+        # must record the slug so those imports skip it.
+        response = client.delete("/api/voices/1")
+        assert response.status_code == 200
+
+        from models.db import DeletedVoiceSlug, get_sync_session
+        with next(get_sync_session()) as session:
+            assert session.get(DeletedVoiceSlug, "test-voice") is not None
+
+    def test_recreating_voice_clears_tombstone(self, client, seeded_db):
+        # An explicit re-add must win over the earlier delete.
+        import io
+        assert client.delete("/api/voices/1").status_code == 200
+
+        response = client.post(
+            "/api/voices/clone",
+            data={"name": "Test Voice", "ref_text": "hello"},
+            files={"ref_audio": ("ref.wav", io.BytesIO(b"fake audio"), "audio/wav")},
+        )
+        assert response.status_code == 200
+
+        from models.db import DeletedVoiceSlug, get_sync_session
+        with next(get_sync_session()) as session:
+            assert session.get(DeletedVoiceSlug, "test-voice") is None
+
 
 class TestVoicePreview:
     def test_preview_nonexistent_voice(self, client, seeded_db):

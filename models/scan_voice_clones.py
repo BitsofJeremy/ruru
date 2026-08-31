@@ -18,6 +18,17 @@ def _pair_files(audio_files, text_files):
                 pairs.append((af, tf)); break
     return pairs
 
+def _tombstoned_slugs(cur):
+    """Slugs the user deleted via the UI (see models.db.DeletedVoiceSlug).
+
+    Returns an empty set when the table doesn't exist yet (fresh/legacy DB
+    created outside init_db, as in tests).
+    """
+    try:
+        return {r[0] for r in cur.execute("SELECT slug FROM deleted_voice_slugs").fetchall()}
+    except sqlite3.OperationalError:
+        return set()
+
 def _parse_prompt(prompt_path):
     """Parse a .prompt.txt into (display_name, persona_title, paragraph).
 
@@ -58,10 +69,15 @@ def scan_voice_clones(db_path, clones_dir, voice_dir) -> int:
         seen = set(); by_name = set()
         for r in cur.fetchall():
             seen.add(r[0]); by_name.add((r[1] or '').lower())
+        tombstoned = _tombstoned_slugs(cur)
         for af, tf in pairs:
             ns = _normalize_stem(af.name)
             slug = re.sub('[^a-z0-9]+','-',ns).strip('-')
             parsed = _parse_prompt(prompts[ns]) if ns in prompts else None
+            if slug in tombstoned:
+                # The user deleted this voice via the UI; a missing row is
+                # intentional, not an import gap to fill.
+                continue
             if slug in seen:
                 # Backfill legacy imports that predate .prompt.txt support.
                 row = cur.execute(

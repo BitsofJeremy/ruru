@@ -96,3 +96,44 @@ class TestSeedVoices:
         assert count == 1
 
         sys.modules.pop("models.seed_voices", None)
+
+    @pytest.mark.asyncio
+    async def test_seed_skips_tombstoned_slug(self, tmp_db, tmp_path, monkeypatch):
+        """A user-deleted ephergent voice must not resurrect on restart."""
+        import sqlite3
+        import sys
+        import types
+
+        from models.db import init_db
+
+        await init_db(tmp_db)
+        voices_dir = tmp_path / "ephergent_voices"
+        voices_dir.mkdir()
+
+        fake_module = types.ModuleType("characters_data")
+
+        class FakeChar:
+            name = "Test Char"
+            ref_audio_path = "ephergent_voices/does_not_exist.wav"
+            voice_description = "test voice"
+            ref_text = "hello"
+            speaking_style = "neutral"
+            emotional_range = ["calm"]
+
+        fake_module.CHARACTERS = {"testchar": FakeChar}
+        monkeypatch.setitem(sys.modules, "characters_data", fake_module)
+        sys.modules.pop("models.seed_voices", None)
+        from models.seed_voices import seed_voices
+
+        conn = sqlite3.connect(tmp_db)
+        conn.execute("INSERT INTO deleted_voice_slugs (slug) VALUES ('testchar')")
+        conn.commit(); conn.close()
+
+        seed_voices(tmp_db, tmp_path, voices_dir)
+
+        conn = sqlite3.connect(tmp_db)
+        count = conn.execute("SELECT COUNT(*) FROM voices").fetchone()[0]
+        conn.close()
+        assert count == 0
+
+        sys.modules.pop("models.seed_voices", None)
