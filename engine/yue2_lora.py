@@ -39,11 +39,12 @@ def load_ckpt(path, map_location="cpu"):
     layers = sorted({int(k.split(".")[1]) for k in t if k.startswith("layers.")})
     lora = []
     for L in layers:
-        for blk, proj in _AR_MODS:
-            lora += [
-                t[f"layers.{L}.{blk}.{proj}.lora_A"],
-                t[f"layers.{L}.{blk}.{proj}.lora_B"],
-            ]
+        for blk_name, proj_names in _AR_MODS:
+            for proj in proj_names:
+                lora += [
+                    t[f"layers.{L}.{blk_name}.{proj}.lora_A"],
+                    t[f"layers.{L}.{blk_name}.{proj}.lora_B"],
+                ]
     return {"lora": lora, "rank": int(meta.get("rank", lora[0].shape[0]))}
 
 
