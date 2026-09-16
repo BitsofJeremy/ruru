@@ -702,6 +702,68 @@ async def api_tts_clips():
     return HTMLResponse(render("partials/tts_clips.html", clips=clips))
 
 # =============================================================================
+# Routes: Music (YuE2-3B) — v0.7.0
+
+@app.get("/music", response_class=HTMLResponse)
+async def music_page():
+    async with get_async_session() as session:
+        from models.db import Job
+        active_jobs_count = await session.scalar(
+            sqlalchemy.select(func.count()).select_from(Job).where(Job.status.in_(('queued', 'running')))
+        )
+    return HTMLResponse(render("music.html", active_jobs_count=active_jobs_count))
+
+@app.post("/api/music", response_class=HTMLResponse)
+async def api_music(request: Request):
+    form = await request.form()
+    style = form.get("style", "").strip()
+    lyrics = form.get("lyrics", "").strip()
+    instrumental = form.get("instrumental") == "on"
+    seed_raw = (form.get("seed") or "").strip()
+    audio_format = form.get("audio_format", "wav")
+
+    if not style or not lyrics:
+        return HTMLResponse("<p class='text-red-500'>Style and lyrics required.</p>", status_code=400)
+    seed = int(seed_raw) if seed_raw else None
+
+    async with get_async_session() as session:
+        from models.db import Job
+        new_job = Job(
+            title=f"Music: {style[:80]}",
+            voice_id=None,
+            status="queued",
+            source_path=f"{style}\n---\n{lyrics}",
+            scope="music",
+            audio_format=audio_format,
+        )
+        session.add(new_job)
+        await session.commit()
+        job_id = new_job.id
+
+    payload = {
+        "style": style,
+        "lyrics": lyrics,
+        "instrumental": instrumental,
+        "seed": seed,
+        "audio_format": audio_format,
+    }
+    runner = get_runner()
+    future = await runner.enqueue(job_id, JobType.GENERATE_MUSIC, payload)
+    result = await future
+
+    if result.get("status") == "completed":
+        audio_name = Path(result["output_path"]).name
+        return HTMLResponse(
+            f'<div hx-swap="innerHTML"><audio controls src="/audio/output/{audio_name}" '
+            f'class="w-full mt-2"></audio></div>',
+            headers={"HX-Trigger": "refreshHistory"},
+        )
+    return HTMLResponse(
+        f"<p class='text-red-500'>Job failed: {result.get('message', 'unknown')}</p>",
+        status_code=500,
+    )
+
+# =============================================================================
 # Routes: Narration
 # =============================================================================
 
