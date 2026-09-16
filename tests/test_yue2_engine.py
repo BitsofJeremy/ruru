@@ -86,14 +86,49 @@ def test_gguf_missing_binary_raises_clear_error(monkeypatch, tmp_path):
     monkeypatch.setattr("config.YUE2_AUDIOCPP_BIN", "")
     monkeypatch.setattr("config.YUE2_GGUF_DIR", tmp_path)
     (tmp_path / "yue2-3b-q4_k_m.gguf").write_bytes(b"x")
+    # explicit gguf selection: operator asked for it, no fallback
+    monkeypatch.setattr("config.YUE2_RUNTIME", "gguf")
     eng = YuE2Engine()
     with pytest.raises(RuntimeError, match="RURU_YUE2_AUDIOCPP_BIN"):
         eng.generate(style="s", lyrics="[instrumental]")
 
 
+def test_gguf_unready_falls_back_to_pytorch(monkeypatch, mocker):
+    """Auto-resolved gguf with no binary/weights silently falls back to pytorch
+    (explicit gguf via RURU_YUE2_RUNTIME still raises — that's a deliberate
+    operator choice)."""
+    import sys
+    import types
+
+    monkeypatch.setattr("config.YUE2_RUNTIME", "")   # auto -> gguf on linux
+    monkeypatch.setattr("config.YUE2_AUDIOCPP_BIN", "")  # not configured
+    eng = YuE2Engine()
+    assert eng._resolve_runtime() == "gguf"
+
+    fake_pipe = mocker.MagicMock()
+    fake_song = mocker.MagicMock()
+    fake_song.save = mocker.MagicMock()
+    fake_pipe.side_effect = lambda **kw: fake_song
+    fake_yue2 = types.ModuleType("yue2")
+    fake_yue2.YuE2Pipeline = mocker.MagicMock()
+    fake_yue2.YuE2Pipeline.from_pretrained.return_value = fake_pipe
+    monkeypatch.setitem(sys.modules, "yue2", fake_yue2)
+    monkeypatch.setattr(eng, "_read_result_wav", lambda p: (np.zeros(1), 48000))
+
+    def fake_save_real(out_path):
+        import soundfile as _sf
+        _sf.write(str(out_path), np.zeros(4800, dtype="float32"), 48000, format="WAV")
+
+    fake_song.save.side_effect = fake_save_real
+    result = eng.generate(style="s", lyrics="[verse]")
+    assert result is not None  # reached pytorch, no exception
+
+
 def test_gguf_missing_model_raises_clear_error(monkeypatch, tmp_path):
     monkeypatch.setattr("config.YUE2_AUDIOCPP_BIN", "/fake/bin/audiocpp")
     monkeypatch.setattr("config.YUE2_GGUF_DIR", tmp_path)
+    # explicit gguf selection: no fallback even when weights are missing
+    monkeypatch.setattr("config.YUE2_RUNTIME", "gguf")
     eng = YuE2Engine()
     with pytest.raises(RuntimeError, match="missing"):
         eng.generate(style="s", lyrics="[instrumental]")

@@ -58,6 +58,13 @@ class YuE2Engine:
             return runtime
         return "mlx" if platform.system() == "Darwin" else "gguf"
 
+    @staticmethod
+    def _configured_runtime() -> str:
+        """The raw RURU_YUE2_RUNTIME value ('' when auto)."""
+        import config
+
+        return (config.YUE2_RUNTIME or "").strip().lower()
+
     # -- generation ---------------------------------------------------------
     def generate(
         self,
@@ -69,9 +76,21 @@ class YuE2Engine:
     ) -> TTSResult:
         """Generate one song; returns a TTSResult (tuple-unpackable, .write-able)."""
         runtime = self._resolve_runtime()
+        explicit = bool((config_runtime := self._configured_runtime()))
         if instrumental and runtime != "pytorch":
             logger.info(
                 "Instrumental LoRA requested: switching %s -> pytorch runtime", runtime
+            )
+            runtime = "pytorch"
+        if runtime == "gguf" and not explicit and not self._gguf_ready():
+            # gguf is the AUTO default on Linux, but if the weights/binary
+            # aren't set up, fall back to pytorch instead of failing — base
+            # pytorch handles vocal songs fine (only instrumental needs LoRA).
+            # An explicit RURU_YUE2_RUNTIME=gguf gets no fallback: the operator
+            # asked for gguf, so a missing setup must fail loudly.
+            logger.info(
+                "YuE2 gguf runtime not ready (missing weights or "
+                "RURU_YUE2_AUDIOCPP_BIN) — falling back to pytorch"
             )
             runtime = "pytorch"
         if runtime == "gguf":
@@ -81,6 +100,15 @@ class YuE2Engine:
         if runtime == "mlx":
             return self._generate_mlx(style, lyrics, seed, cot)
         raise ValueError(f"Unknown YuE2 runtime: {runtime!r}")
+
+    @staticmethod
+    def _gguf_ready() -> bool:
+        """True when the gguf runtime has both its weights and a binary."""
+        import config
+
+        if not config.YUE2_AUDIOCPP_BIN:
+            return False
+        return (Path(config.YUE2_GGUF_DIR) / GGUF_MAIN).is_file()
 
     @staticmethod
     def _cap_lyrics(lyrics: str, *, cap_seconds: int) -> str:
@@ -224,13 +252,17 @@ class YuE2Engine:
 
         pipe = self._load_pytorch_pipeline(with_lora=instrumental)
         lyrics = self._cap_lyrics(lyrics, cap_seconds=config.YUE2_MAX_SECONDS)
+        gen_kwargs = {
+            "style": style,
+            "lyrics": lyrics,
+            "cot": cot or config.YUE2_COT,
+        }
+        if seed is not None:
+            # yue2's SongRequest rejects seed=None explicitly (default 831001);
+            # only pass a seed when the user gave one.
+            gen_kwargs["seed"] = seed
         with tempfile.TemporaryDirectory(prefix="ruru_yue2_") as td:
-            song = pipe(
-                style=style,
-                lyrics=lyrics,
-                cot=cot or config.YUE2_COT,
-                seed=seed,
-            )
+            song = pipe(**gen_kwargs)
             out = Path(td) / "song.flac"
             song.save(str(out))
             wav, sr = sf.read(str(out), dtype="float32", always_2d=False)
