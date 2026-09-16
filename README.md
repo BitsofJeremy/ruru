@@ -322,6 +322,16 @@ export RURU_YUE2_AUDIOCPP_BIN=/path/to/audiocpp/binary
 `m-a-p/YuE2-3B` (watch the `transformers==4.57.3` pin from `qwen-tts` — use
 `--no-deps` if uv reports a conflict).
 
+> **⚠️ `uv sync` removes yue2-infer.** Because it's installed `--no-deps`
+> (outside the lockfile), every `uv sync --extra cuda` prunes it. After any
+> sync, reinstall before music will work:
+> ```bash
+> uv pip install --python .venv/bin/python --no-deps ./yue2_infer-0.1.5-py3-none-any.whl tiktoken
+> ```
+> (Download the wheel from the `m-a-p/YuE2-3B` HF repo.) Symptom if forgotten:
+> `ModuleNotFoundError: No module named 'yue2'` in the ruru-web journal when a
+> music job runs.
+
 Knobs: `RURU_YUE2_RUNTIME` (gguf/pytorch/mlx/"" = auto),
 `RURU_YUE2_MAX_SECONDS` (90; drop to 60 if the 12 GB card OOMs),
 `RURU_YUE2_INST_LORA_SCALE` (1.0), `RURU_YUE2_COT` (full).
