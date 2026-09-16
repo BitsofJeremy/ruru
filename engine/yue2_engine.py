@@ -1,0 +1,268 @@
+"""YuE2-3B music-generation engine (NOT a TTSEngineBase subclass).
+
+Two runtimes behind one generate() method:
+
+- "gguf"    — shells out to an audio.cpp binary (Q4_K_M quant, ~7 GB VRAM).
+              Default on the 12 GB RTX 3060 box. No LoRA support.
+- "pytorch" — m-a-p yue2_infer wheel, optional instrumental-LoRA fold.
+              Only runtime that supports the Mothersuperior LoRA; song length
+              is capped (config.YUE2_MAX_SECONDS) to stay inside 12 GB.
+- "mlx"     — Apple Silicon via ahmadw/YuE2-3B-MLX generate.py (8-bit).
+              No LoRA support (verified 2026-09-16: the MLX repo ships no
+              adapter files and no --lora flag).
+
+Heavy imports are method-scoped so importing this module on any platform is
+harmless (same rule as cuda_engine.py / mlx_engine.py).
+"""
+from __future__ import annotations
+
+import logging
+import platform
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import soundfile as sf
+
+from engine.result import TTSResult
+
+logger = logging.getLogger(__name__)
+
+GGUF_MAIN = "yue2-3b-q4_k_m.gguf"
+GGUF_VAE = "yue2-vae-f16.gguf"
+
+
+class YuE2Engine:
+    """Wraps YuE2 music generation. One generate() call, one song."""
+
+    def __init__(self) -> None:
+        self._pipe = None
+        self._pipe_lora: bool | None = None
+
+    # -- lifecycle --------------------------------------------------------
+    @property
+    def is_loaded(self) -> bool:
+        return self._pipe is not None
+
+    def unload(self) -> None:
+        self._pipe = None
+        self._pipe_lora = None
+
+    def _resolve_runtime(self) -> str:
+        import config
+
+        runtime = (config.YUE2_RUNTIME or "").strip().lower()
+        if runtime:
+            return runtime
+        return "mlx" if platform.system() == "Darwin" else "gguf"
+
+    # -- generation ---------------------------------------------------------
+    def generate(
+        self,
+        style: str,
+        lyrics: str,
+        instrumental: bool = False,
+        seed: int | None = None,
+        cot: str | None = None,
+    ) -> TTSResult:
+        """Generate one song; returns a TTSResult (tuple-unpackable, .write-able)."""
+        runtime = self._resolve_runtime()
+        if instrumental and runtime != "pytorch":
+            logger.info(
+                "Instrumental LoRA requested: switching %s -> pytorch runtime", runtime
+            )
+            runtime = "pytorch"
+        if runtime == "gguf":
+            return self._generate_gguf(style, lyrics, seed, cot)
+        if runtime == "pytorch":
+            return self._generate_pytorch(style, lyrics, instrumental, seed, cot)
+        if runtime == "mlx":
+            return self._generate_mlx(style, lyrics, seed, cot)
+        raise ValueError(f"Unknown YuE2 runtime: {runtime!r}")
+
+    @staticmethod
+    def _cap_lyrics(lyrics: str, *, cap_seconds: int) -> str:
+        """Cap requested song length for the pytorch runtime.
+
+        The 12 GB card OOMs on long-context pytorch runs (upstream peaked at
+        14 GiB). Timed section tags are the strongest length steer the LoRA
+        knows, so when the lyrics use ``[tag m:ss-m:ss]`` lines that run past
+        the cap, compress the times proportionally. Untagged / bare lyrics are
+        passed through untouched (the cap alone can't steer those).
+        """
+        pat = re.compile(r"^(\[\w+)( \d{1,2}:\d{2})-(\d{1,2}:\d{2})(\])$")
+
+        def secs(ts: str) -> int:
+            m, s = ts.strip().split(":")
+            return int(m) * 60 + int(s)
+
+        def fmt(total: int) -> str:
+            return f"{total // 60}:{total % 60:02d}"
+
+        lines = lyrics.splitlines()
+        matches = [pat.match(ln) for ln in lines]
+        if not matches or not any(matches):
+            return lyrics
+        ends = [secs(m.group(3)) for m in matches if m]
+        longest = max(ends)
+        cap = int(cap_seconds)
+        if longest <= cap:
+            return lyrics
+        factor = cap / longest
+        out = []
+        for ln, m in zip(lines, matches):
+            if not m:
+                out.append(ln)
+                continue
+            new_start = int(secs(m.group(2)) * factor)
+            new_end = int(secs(m.group(3)) * factor)
+            out.append(f"{m.group(1)} {fmt(new_start)}-{fmt(new_end)}{m.group(4)}")
+        logger.info(
+            "YuE2: lyrics requested %ds, compressing section times to ~%ds cap",
+            longest, cap,
+        )
+        return "\n".join(out)
+
+    # -- gguf (audio.cpp subprocess) -----------------------------------------
+    def _audiocpp_binary(self) -> Path:
+        import config
+
+        if config.YUE2_AUDIOCPP_BIN:
+            return Path(config.YUE2_AUDIOCPP_BIN)
+        raise RuntimeError(
+            "RURU_YUE2_AUDIOCPP_BIN is not set. Build audio.cpp (dev branch) "
+            "and point RURU_YUE2_AUDIOCPP_BIN at the binary — see README "
+            "'Music (YuE2)' section."
+        )
+
+    @staticmethod
+    def _gguf_output_target(out_dir: Path) -> Path:
+        return out_dir / "song.wav"
+
+    def _generate_gguf(self, style, lyrics, seed, cot) -> TTSResult:
+        import config
+
+        model_dir = Path(config.YUE2_GGUF_DIR)
+        if not (model_dir / GGUF_MAIN).is_file():
+            raise RuntimeError(
+                f"{model_dir / GGUF_MAIN} missing — run the GGUF download step "
+                "in README 'Music (YuE2)'."
+            )
+        with tempfile.TemporaryDirectory(prefix="ruru_yue2_") as td:
+            out = self._gguf_output_target(Path(td))
+            cmd = [
+                str(self._audiocpp_binary()),
+                "--model", str(model_dir / GGUF_MAIN),
+                "--vae", str(model_dir / GGUF_VAE),
+                "--style", style,
+                "--text", lyrics,
+                "--request-option", f"cot={cot or config.YUE2_COT}",
+                "--out", str(out),
+            ]
+            if seed is not None:
+                cmd += ["--request-option", f"seed={seed}"]
+            logger.info("YuE2 gguf: %s", " ".join(cmd))
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"audio.cpp failed ({proc.returncode}): {proc.stderr[-2000:]}"
+                )
+            return self._read_result_wav(out)
+
+    def _read_result_wav(self, path: Path) -> TTSResult:
+        wav, sr = sf.read(str(path), dtype="float32", always_2d=False)
+        if wav.ndim == 2:  # stereo -> fold to mono for TTSResult
+            wav = wav.mean(axis=1)
+        return TTSResult(wav, int(sr))
+
+    # -- pytorch (yue2_infer wheel, optional LoRA) ----------------------------
+    def _load_pytorch_pipeline(self, with_lora: bool):
+        import config
+
+        if self._pipe is not None and self._pipe_lora == with_lora:
+            return self._pipe
+        from yue2 import YuE2Pipeline
+
+        self.unload()
+        pipe = YuE2Pipeline.from_pretrained(config.YUE2_MODEL_REPO, device="cuda")
+        if with_lora:
+            self._apply_instrumental_lora(pipe)
+        self._pipe = pipe
+        self._pipe_lora = with_lora
+        return pipe
+
+    def _apply_instrumental_lora(self, pipe) -> None:
+        """Fold the Mothersuperior AR LoRA into the base weights: W += scale*B@A.
+
+        The proven path from the LoRA repo's own scripts/ (vendored in
+        ``engine/yue2_lora.py``). Folding into the weights (rather than
+        wrapping modules) keeps the pipeline's CUDA-graph sampler working.
+        """
+        import torch
+
+        import config
+        from engine.yue2_lora import load_ckpt, merge_ar_lora
+        from huggingface_hub import hf_hub_download
+
+        path = hf_hub_download(
+            config.YUE2_INST_LORA_REPO, "ar_lora_inst_v3abc.bf16.safetensors"
+        )
+        ckpt = load_ckpt(path, "cuda")
+        scale = float(config.YUE2_INST_LORA_SCALE)
+        model = pipe._load_model()      # exact call ar_generate.py uses
+        bb = model.model                # backbone: .layers / .self_attn / .mlp
+        with torch.no_grad():
+            n = merge_ar_lora(bb, ckpt["lora"], scale=scale)
+        logger.info(
+            "YuE2: instrumental AR LoRA folded (%d projections, scale %s)", n, scale
+        )
+
+    def _generate_pytorch(self, style, lyrics, instrumental, seed, cot) -> TTSResult:
+        import config
+
+        pipe = self._load_pytorch_pipeline(with_lora=instrumental)
+        lyrics = self._cap_lyrics(lyrics, cap_seconds=config.YUE2_MAX_SECONDS)
+        with tempfile.TemporaryDirectory(prefix="ruru_yue2_") as td:
+            song = pipe(
+                style=style,
+                lyrics=lyrics,
+                cot=cot or config.YUE2_COT,
+                seed=seed,
+            )
+            out = Path(td) / "song.flac"
+            song.save(str(out))
+            wav, sr = sf.read(str(out), dtype="float32", always_2d=False)
+            if wav.ndim == 2:
+                wav = wav.mean(axis=1)
+            return self._read_result_wav(self._trim_to_cap(out, int(sr), wav))
+
+    def _trim_to_cap(self, out: Path, sr: int, wav) -> Path:
+        import config
+
+        cap = config.YUE2_MAX_SECONDS * sr
+        if len(wav) > cap:
+            sf.write(str(out), wav[:cap], sr, subtype="PCM_16")
+        return out
+
+    # -- mlx (macOS; no LoRA — verified) ---------------------------------------
+    def _generate_mlx(self, style, lyrics, seed, cot) -> TTSResult:
+        import config
+
+        if platform.system() != "Darwin":
+            raise RuntimeError("MLX YuE2 runtime is macOS-only")
+        mlx_dir = Path(config.MLX_MODELS_PATH) / "YuE2-3B-MLX"
+        with tempfile.TemporaryDirectory(prefix="ruru_yue2_") as td:
+            out = Path(td) / "song.wav"
+            cmd = [
+                "python", str(mlx_dir / "generate.py"),
+                "--model", "8bit", "--style", style, "--lyrics", lyrics,
+                "--cot", cot or config.YUE2_COT, "--out", str(out),
+            ]
+            if seed is not None:
+                cmd += ["--seed", str(seed)]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            if proc.returncode != 0:
+                raise RuntimeError(f"MLX YuE2 failed: {proc.stderr[-2000:]}")
+            return self._read_result_wav(out)

@@ -281,8 +281,52 @@ Together they mean a backend developed on one machine can be trusted to drop int
 - **[Tailwind CSS](https://tailwindcss.com/)** — utility-first styling (CDN)
 - **[SQLAlchemy](https://www.sqlalchemy.org/) + [aiosqlite](https://github.com/omnilib/aiosqlite)** — ORM and async SQLite
 - **[Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS)** — text-to-speech models
+- **[YuE2-3B](https://huggingface.co/m-a-p/YuE2-3B)** — music generation (v0.7.0)
 - **[pydub](https://github.com/jiaaro/pydub)** — audio processing
 - **[uv](https://docs.astral.sh/uv/)** — Python package management
+
+## Music (YuE2-3B) — v0.7.0
+
+ruru can generate 48 kHz stereo music with [YuE2-3B](https://huggingface.co/m-a-p/YuE2-3B)
+via the **Music** page. Two interchangeable runtimes, picked per request:
+
+| Runtime | Weights | VRAM | LoRA | Notes |
+|---|---|---|---|---|
+| `gguf` (default on Linux) | Q4_K_M + F16 VAE from `audio-cpp/Yue2-3B-GGUF` (~5 GB on disk) | ~7–8 GB peak | **no** | audio.cpp subprocess (dev branch, build from source) |
+| `pytorch` | `m-a-p/YuE2-3B` bf16 via the `yue2_infer` wheel | 11–14 GB peak | **yes** | instrumental LoRA lives here; 90 s song cap by default |
+| `mlx` (default on macOS) | `ahmadw/YuE2-3B-MLX` 8-bit | ~23 GB unified | **no** | MLX repo has **no adapter loading** — verified 2026-09-16 |
+
+The LoRA is [`Mothersuperior/YuE2-instrumental-cot-full-loras`](https://huggingface.co/Mothersuperior/YuE2-instrumental-cot-full-loras)
+(AR branch, rank 64, `cot="full"`), merged with the vendored
+`engine/yue2_lora.py` — adapted from that repo's own `scripts/` (`W += scale*B@A`
+fold into the base weights, keeping CUDA graphs working). Base-model instrumental
+generation without the LoRA is effectively impossible — that's why the checkbox
+exists.
+
+**Setup (Linux, Q4 default):**
+
+```bash
+# 1. Weights (~5 GB)
+uv run python -c "
+from huggingface_hub import snapshot_download
+snapshot_download('audio-cpp/Yue2-3B-GGUF',
+    allow_patterns=['yue2-3b-q4_k_m.gguf','yue2-vae-f16.gguf','sidecars/*'],
+    local_dir='data/models/yue2-gguf')"
+
+# 2. audio.cpp binary (dev branch); then:
+export RURU_YUE2_AUDIOCPP_BIN=/path/to/audiocpp/binary
+```
+
+**Setup (instrumental LoRA / pytorch runtime):** install
+`huggingface-hub==0.36.2` + the `yue2_infer-0.1.5-py3-none-any.whl` from
+`m-a-p/YuE2-3B` (watch the `transformers==4.57.3` pin from `qwen-tts` — use
+`--no-deps` if uv reports a conflict).
+
+Knobs: `RURU_YUE2_RUNTIME` (gguf/pytorch/mlx/"" = auto),
+`RURU_YUE2_MAX_SECONDS` (90; drop to 60 if the 12 GB card OOMs),
+`RURU_YUE2_INST_LORA_SCALE` (1.0), `RURU_YUE2_COT` (full).
+Model + LoRA are CC BY-NC 4.0 (non-commercial). Music on Apple Silicon has no
+LoRA and no realistic path to one until the MLX port grows adapter support.
 
 ## License
 

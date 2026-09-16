@@ -14,6 +14,7 @@ class JobType(str, Enum):
     GENERATE_TTS = "generate_tts"
     NARRATE_DOCUMENT = "narrate_document"
     REGENERATE_CHAPTER = "regenerate_chapter"
+    GENERATE_MUSIC = "generate_music"
 
 
 @dataclass
@@ -78,6 +79,9 @@ class JobRunner:
                 elif job.job_type == JobType.REGENERATE_CHAPTER:
                     from jobs.tasks import run_regenerate_chapter
                     result = await asyncio.to_thread(run_regenerate_chapter, job.job_id, **job.payload)
+                elif job.job_type == JobType.GENERATE_MUSIC:
+                    from jobs.tasks import run_generate_music
+                    result = await asyncio.to_thread(run_generate_music, job.job_id, **job.payload)
                 else:
                     result = {"status": "error", "message": f"Unknown job type: {job.job_type}"}
                 job.future.set_result(result)

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Music - ruru{% endblock %}
+
+{% block nav_music %}text-kj-accent bg-kj-accent/10{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <h1 class="text-3xl font-bold">Music</h1>
+    <p class="text-kj-muted">Generate a song with YuE2-3B — a style prompt plus lyrics or structure tags.</p>
+
+    {% if active_jobs_count > 0 %}
+    <div class="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-4 text-yellow-400">
+        <strong>Job in progress</strong> — The Music form is disabled while {{ active_jobs_count }} job(s) are queued or running. Come back when they finish.
+    </div>
+    {% endif %}
+
+    <div{% if active_jobs_count > 0 %} class="opacity-50 pointer-events-none"{% endif %}>
+        <div class="bg-kj-card border border-kj-border rounded-xl p-6 max-w-2xl">
+            <form hx-post="/api/music" hx-target="#music-result" hx-swap="innerHTML" hx-indicator="#music-spinner">
+            <div class="space-y-5">
+                <!-- Style prompt -->
+                <div>
+                    <label for="style" class="block text-sm font-medium text-kj-muted mb-2">Style</label>
+                    <input type="text" name="style" id="style" required
+                           placeholder="dark ambient, water phone, theremin, piano, slow"
+                           class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent">
+                </div>
+
+                <!-- Lyrics / structure tags -->
+                <div>
+                    <label for="lyrics" class="block text-sm font-medium text-kj-muted mb-2">Lyrics / structure</label>
+                    <textarea name="lyrics" id="lyrics" rows="6" required
+                              placeholder="Timed section tags steer length:&#10;[intro 0:00-0:10]&#10;[verse 0:10-0:25]&#10;[outro 0:25-0:30]&#10;&#10;Or bare tags: [instrumental] — or real lyrics with [Verse]/[Chorus] for vocal songs."
+                              class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent resize-y"></textarea>
+                </div>
+
+                <!-- Instrumental LoRA toggle -->
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" name="instrumental" id="instrumental" checked
+                           class="h-4 w-4 rounded border-kj-border bg-kj-bg text-kj-accent">
+                    <label for="instrumental" class="text-sm text-kj-muted">
+                        Instrumental (LoRA — uses the PyTorch runtime, slower)
+                    </label>
+                </div>
+
+                <!-- Seed -->
+                <div>
+                    <label for="seed" class="block text-sm font-medium text-kj-muted mb-2">Seed (optional)</label>
+                    <input type="number" name="seed" id="seed"
+                           class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                </div>
+
+                <!-- Submit -->
+                <div class="flex items-center gap-4">
+                    <button type="submit"
+                            class="px-6 py-2.5 bg-kj-accent hover:bg-kj-accent/80 text-white font-medium rounded-lg transition-colors">
+                        Generate
+                    </button>
+                    <div id="music-spinner" class="htmx-indicator flex items-center gap-2 text-kj-muted text-sm">
+                        <div class="animate-spin h-4 w-4 border-2 border-kj-accent2 border-t-transparent rounded-full"></div>
+                        <span>Generating music... this can take several minutes</span>
+                    </div>
+                </div>
+            </div>
+        </form>
+        </div>
+    </div>
+
+    <!-- Result area -->
+    <div id="music-result" class="max-w-2xl"></div>
+</div>
+{% endblock %}
