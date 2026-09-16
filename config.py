@@ -61,6 +61,23 @@ CHUNK_MAX_CHARS = int(_env("CHUNK_MAX_CHARS", "700"))
 MAX_RETRIES = int(_env("MAX_RETRIES", "3"))
 CREATOR_TAG = _env("CREATOR_TAG", "Created by ruru")
 
+# --- YuE2 music generation --------------------------------------------------
+# Runtime backend for music: "gguf" (audio.cpp subprocess, Q4 quant, no LoRA),
+# "pytorch" (yue2_infer wheel, supports the instrumental LoRA), "mlx" (Apple
+# Silicon via ahmadw/YuE2-3B-MLX scripts), or "" = auto (gguf on Linux, mlx on
+# Darwin). The instrumental LoRA only exists for the pytorch runtime.
+YUE2_RUNTIME = _env("YUE2_RUNTIME", "")
+YUE2_MODEL_REPO = _env("YUE2_MODEL_REPO", "m-a-p/YuE2-3B")
+YUE2_GGUF_DIR = Path(_env("YUE2_GGUF_DIR", str(DATA_DIR / "models/yue2-gguf")))
+YUE2_AUDIOCPP_BIN = _env("YUE2_AUDIOCPP_BIN", "")
+YUE2_INST_LORA_REPO = _env(
+    "YUE2_INST_LORA_REPO", "Mothersuperior/YuE2-instrumental-cot-full-loras"
+)
+YUE2_INST_LORA_SCALE = float(_env("YUE2_INST_LORA_SCALE", "1.0"))
+YUE2_COT = _env("YUE2_COT", "full")
+# PyTorch-runtime song length cap (seconds) — keeps peak VRAM inside 12 GB.
+YUE2_MAX_SECONDS = int(_env("YUE2_MAX_SECONDS", "90"))
+
 _REPO = Path(_env(
     "_REPO",
     str(Path(__file__).parent.parent.resolve())
