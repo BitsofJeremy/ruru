@@ -66,3 +66,34 @@ class TestConfigDefaults:
         import importlib, config as c
         importlib.reload(c)
         assert c.CHUNK_MAX_CHARS == 700
+
+
+class TestYue2Config:
+    """YuE2 music-generation config knobs (v0.7.0)."""
+
+    def test_yue2_defaults(self, monkeypatch):
+        for var in ("YUE2_RUNTIME", "YUE2_AUDIOCPP_BIN", "YUE2_COT",
+                    "YUE2_INST_LORA_REPO", "YUE2_INST_LORA_SCALE",
+                    "YUE2_MAX_SECONDS", "YUE2_GGUF_DIR", "YUE2_MODEL_REPO"):
+            monkeypatch.delenv(f"RURU_{var}", raising=False)
+        import importlib, config as c
+        importlib.reload(c)
+        assert c.YUE2_RUNTIME == ""          # "" = auto: gguf on Linux, mlx on Darwin
+        assert c.YUE2_COT == "full"
+        assert c.YUE2_MAX_SECONDS == 90
+        assert c.YUE2_INST_LORA_SCALE == 1.0
+        assert c.YUE2_INST_LORA_REPO == "Mothersuperior/YuE2-instrumental-cot-full-loras"
+        assert c.YUE2_MODEL_REPO == "m-a-p/YuE2-3B"
+        assert str(c.YUE2_GGUF_DIR).endswith("yue2-gguf")
+
+    def test_yue2_runtime_from_env(self, monkeypatch):
+        monkeypatch.setenv("RURU_YUE2_RUNTIME", "gguf")
+        import importlib, config as c
+        importlib.reload(c)
+        assert c.YUE2_RUNTIME == "gguf"
+
+    def test_yue2_max_seconds_from_env(self, monkeypatch):
+        monkeypatch.setenv("RURU_YUE2_MAX_SECONDS", "60")
+        import importlib, config as c
+        importlib.reload(c)
+        assert c.YUE2_MAX_SECONDS == 60
