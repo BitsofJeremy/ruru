@@ -100,40 +100,55 @@ def test_gguf_missing_model_raises_clear_error(monkeypatch, tmp_path):
 
 
 def test_pytorch_lora_flag_selects_merge(monkeypatch, mocker):
+    """Instrumental=True drives the real pipeline-load path, which invokes the
+    LoRA fold. We mock _apply_instrumental_lora's *internals* (ckpt load +
+    merge) rather than the pipeline loader, so we verify the wiring end to end."""
+    import sys
     import tempfile as _tempfile
     import contextlib
+    import types
 
     monkeypatch.setattr("config.YUE2_RUNTIME", "pytorch")
     monkeypatch.setattr("config.YUE2_INST_LORA_SCALE", 1.0)
     monkeypatch.setattr("config.YUE2_MAX_SECONDS", 90)
     eng = YuE2Engine()
-    fake_pipe = mocker.MagicMock()
-    merged = {}
     real_mkdtemp = _tempfile.mkdtemp
 
     def fake_save(out_path):
         import soundfile as _sf
         _sf.write(str(out_path), np.zeros(4800, dtype="float32"), 48000, format="WAV")
 
-    monkeypatch.setattr(
-        eng, "_load_pytorch_pipeline",
-        lambda with_lora: merged.update(lora=with_lora) or fake_pipe,
-    )
-    mocker.patch("engine.yue2_lora.load_ckpt", return_value={"lora": [], "rank": 64})
-    merge = mocker.patch("engine.yue2_lora.merge_ar_lora", return_value=392)
-    monkeypatch.setattr(eng, "_read_result_wav", lambda p: (np.zeros(1), 48000))
+    # Fake the yue2 wheel: from_pretrained -> pipe; pipe(...) -> song.save(path)
+    fake_pipe = mocker.MagicMock()
     fake_song = mocker.MagicMock()
     fake_song.save.side_effect = fake_save
     fake_pipe.side_effect = lambda **kw: fake_song
+    fake_yue2 = types.ModuleType("yue2")
+    fake_yue2.YuE2Pipeline = mocker.MagicMock()
+    fake_yue2.YuE2Pipeline.from_pretrained.return_value = fake_pipe
+    monkeypatch.setitem(sys.modules, "yue2", fake_yue2)
 
-    @contextlib.contextmanager
-    def fake_td(*a, **kw):
-        yield real_mkdtemp()
+    # Stub the backbone so the real fold math walks an empty layer list fast,
+    # but keep _load_pytorch_pipeline + _apply_instrumental_lora REAL.
+    fake_model = mocker.MagicMock()
+    fake_model.model.layers = []
+    fake_pipe._load_model.return_value = fake_model
+    mocker.patch("engine.yue2_lora.load_ckpt", return_value={"lora": [], "rank": 64})
+    merge = mocker.patch("engine.yue2_lora.merge_ar_lora", wraps=lambda bb, t, scale=1.0: 0)
 
-    monkeypatch.setattr("engine.yue2_engine.tempfile.TemporaryDirectory", fake_td)
+    # Wrap tempfile so hf_hub (imported fresh here) is untouched but our engine's
+    # module-global `tempfile` reference gets a working context manager that
+    # yields a real dir. We patch the attribute on the tempfile MODULE CLASS
+    # level? No — hf_hub shares it. Instead: real TemporaryDirectory always.
+    # (No patch needed — the engine already uses real tempfile, and the fake
+    # pipeline writes real audio into it.)
+    monkeypatch.setattr(eng, "_read_result_wav", lambda p: (np.zeros(1), 48000))
+
     eng.generate(style="s", lyrics="[instrumental]", instrumental=True)
-    assert merged["lora"] is True
-    assert merge.call_args.kwargs["scale"] == 1.0
+    # from_pretrained saw the LoRA flag -> fold path entered
+    assert eng._pipe_lora is True
+    assert merge.call_count == 1
+    assert merge.call_args.kwargs.get("scale") == 1.0
 
 
 def test_cap_lyrics_compresses_timed_tags():

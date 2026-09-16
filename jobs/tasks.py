@@ -261,3 +261,44 @@ def run_regenerate_chapter(job_id: int, **payload) -> dict:
                 session.commit()
         raise
 
+
+def run_generate_music(job_id: int, **payload) -> dict:
+    """Handle YuE2 music generation job (v0.7.0)."""
+    from models.db import get_sync_session, Job
+    from engine.yue2_engine import YuE2Engine
+
+    try:
+        with next(get_sync_session()) as session:
+            job = session.get(Job, job_id)
+            if job:
+                job.status = JobStatus.RUNNING.value
+                session.commit()
+
+        engine = YuE2Engine()
+        result = engine.generate(
+            style=payload.get("style", ""),
+            lyrics=payload.get("lyrics", ""),
+            instrumental=bool(payload.get("instrumental", False)),
+            seed=payload.get("seed"),
+        )
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = f"{output_dir}/music_{job_id}.wav"
+        result.write(output_path)
+
+        with next(get_sync_session()) as session:
+            job = session.get(Job, job_id)
+            if job:
+                job.status = JobStatus.COMPLETED.value
+                job.output_path = output_path
+                session.commit()
+        return {"status": "completed", "output_path": output_path}
+    except Exception as e:
+        logger.error(f"Music job {job_id} failed: {e}", exc_info=True)
+        with next(get_sync_session()) as session:
+            job = session.get(Job, job_id)
+            if job:
+                job.status = JobStatus.FAILED.value
+                job.error_message = str(e)
+                session.commit()
+        raise
+

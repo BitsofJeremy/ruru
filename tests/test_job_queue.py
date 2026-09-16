@@ -25,10 +25,11 @@ class TestGenerateMusicDispatch:
                 "jobs.tasks.run_generate_music",
                 MagicMock(return_value={"status": "completed", "output_path": "/tmp/x.wav"}),
             ):
-                future = asyncio.run(
-                    runner.enqueue(1, JobType.GENERATE_MUSIC, {"style": "lofi"})
-                )
-                result = asyncio.run(asyncio.wait_for(future, timeout=5))
+                async def scenario():
+                    future = await runner.enqueue(1, JobType.GENERATE_MUSIC, {"style": "lofi"})
+                    return await asyncio.wait_for(future, timeout=5)
+
+                result = asyncio.run(scenario())
             assert result == {"status": "completed", "output_path": "/tmp/x.wav"}
         finally:
             runner.stop()
