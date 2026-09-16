@@ -262,3 +262,47 @@ class TestRunRegenerateChapter:
         engine.generate_design.assert_not_called()
         audio.write.assert_called_once()
         assert (task_env["output_dir"] / f"chapter_3_{task_env['job_id']}.wav").exists()
+
+
+class TestRunGenerateMusic:
+    @patch("engine.yue2_engine.YuE2Engine")
+    def test_music_completes_and_writes(self, mock_engine_cls, task_env):
+        from jobs.tasks import run_generate_music
+
+        audio = fake_audio()
+        engine = MagicMock()
+        engine.generate.return_value = audio
+        mock_engine_cls.return_value = engine
+
+        result = run_generate_music(
+            task_env["job_id"],
+            style="lofi hip hop, vinyl crackle, warm",
+            lyrics="[instrumental]",
+            instrumental=True,
+            seed=21,
+        )
+
+        assert result["status"] == "completed"
+        engine.generate.assert_called_once()
+        kwargs = engine.generate.call_args.kwargs
+        assert kwargs["instrumental"] is True
+        assert kwargs["seed"] == 21
+        audio.write.assert_called_once()
+        assert (task_env["output_dir"] / f"music_{task_env['job_id']}.wav").exists()
+
+    @patch("engine.yue2_engine.YuE2Engine")
+    def test_music_failure_marks_job_failed(self, mock_engine_cls, task_env):
+        from jobs.tasks import run_generate_music
+        from models.db import get_sync_session, Job
+
+        engine = MagicMock()
+        engine.generate.side_effect = RuntimeError("boom")
+        mock_engine_cls.return_value = engine
+
+        with pytest.raises(RuntimeError, match="boom"):
+            run_generate_music(task_env["job_id"], style="s", lyrics="l")
+
+        with next(get_sync_session()) as session:
+            job = session.get(Job, task_env["job_id"])
+            assert job.status == "failed"
+            assert "boom" in job.error_message
