@@ -12,6 +12,26 @@ class TestJobType:
         assert JobType.GENERATE_TTS.value == "generate_tts"
         assert JobType.NARRATE_DOCUMENT.value == "narrate_document"
         assert JobType.REGENERATE_CHAPTER.value == "regenerate_chapter"
+        assert JobType.GENERATE_MUSIC.value == "generate_music"
+
+
+class TestGenerateMusicDispatch:
+    def test_generate_music_routes_to_handler(self):
+        """GENERATE_MUSIC dispatches to jobs.tasks.run_generate_music."""
+        runner = JobRunner()
+        runner.start()
+        try:
+            with patch(
+                "jobs.tasks.run_generate_music",
+                MagicMock(return_value={"status": "completed", "output_path": "/tmp/x.wav"}),
+            ):
+                future = asyncio.run(
+                    runner.enqueue(1, JobType.GENERATE_MUSIC, {"style": "lofi"})
+                )
+                result = asyncio.run(asyncio.wait_for(future, timeout=5))
+            assert result == {"status": "completed", "output_path": "/tmp/x.wav"}
+        finally:
+            runner.stop()
 
 
 class TestJobRunner:
