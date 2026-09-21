@@ -13,10 +13,26 @@ def fake_wav(tmp_path):
     return path
 
 
-def test_auto_runtime_is_gguf_on_linux(monkeypatch):
+@pytest.fixture
+def linux_platform(monkeypatch):
+    """Pretend we're on Linux — the gguf auto-default and the mlx rejection
+    are platform-gated. A no-op when actually running on Linux."""
+    monkeypatch.setattr("engine.yue2_engine.platform.system", lambda: "Linux")
+
+
+def test_auto_runtime_is_gguf_on_linux(monkeypatch, linux_platform):
     monkeypatch.setattr("config.YUE2_RUNTIME", "")
     eng = YuE2Engine()
     assert eng._resolve_runtime() == "gguf"
+
+
+def test_auto_runtime_is_mlx_on_mac(monkeypatch):
+    monkeypatch.setattr("config.YUE2_RUNTIME", "")
+    monkeypatch.setattr(
+        "engine.yue2_engine.platform.system", lambda: "Darwin"
+    )
+    eng = YuE2Engine()
+    assert eng._resolve_runtime() == "mlx"
 
 
 def test_instrumental_forces_pytorch_runtime(monkeypatch):
@@ -56,7 +72,7 @@ def test_instrumental_forces_pytorch_runtime(monkeypatch):
     assert merged["lora"] is True
 
 
-def test_gguf_runtime_runs_subprocess(monkeypatch, fake_wav):
+def test_gguf_runtime_runs_subprocess(monkeypatch, linux_platform, fake_wav):
     eng = YuE2Engine()
     calls = {}
 
@@ -93,7 +109,7 @@ def test_gguf_missing_binary_raises_clear_error(monkeypatch, tmp_path):
         eng.generate(style="s", lyrics="[instrumental]")
 
 
-def test_gguf_unready_falls_back_to_pytorch(monkeypatch, mocker):
+def test_gguf_unready_falls_back_to_pytorch(monkeypatch, mocker, linux_platform):
     """Auto-resolved gguf with no binary/weights silently falls back to pytorch
     (explicit gguf via RURU_YUE2_RUNTIME still raises — that's a deliberate
     operator choice)."""
@@ -142,6 +158,16 @@ def test_pytorch_lora_flag_selects_merge(monkeypatch, mocker):
     import tempfile as _tempfile
     import contextlib
     import types
+
+    # torch is CUDA-only (absent under the mlx extra) — _apply_instrumental_lora
+    # only needs no_grad() as a context manager. hf_hub_download is mocked so
+    # the test never touches the network/HF cache on any platform.
+    fake_torch = types.ModuleType("torch")
+    fake_torch.no_grad = contextlib.nullcontext
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(
+        "huggingface_hub.hf_hub_download", lambda *a, **k: "/fake/lora.safetensors"
+    )
 
     monkeypatch.setattr("config.YUE2_RUNTIME", "pytorch")
     monkeypatch.setattr("config.YUE2_INST_LORA_SCALE", 1.0)
@@ -212,7 +238,7 @@ def test_is_loaded_and_unload():
     assert eng.is_loaded is False
 
 
-def test_mlx_runtime_rejected_on_linux(monkeypatch):
+def test_mlx_runtime_rejected_on_linux(monkeypatch, linux_platform):
     monkeypatch.setattr("config.YUE2_RUNTIME", "mlx")
     eng = YuE2Engine()
     with pytest.raises(RuntimeError, match="macOS-only"):
