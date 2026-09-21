@@ -700,7 +700,7 @@ async def api_tts_clips():
     return HTMLResponse(render("partials/tts_clips.html", clips=clips))
 
 # =============================================================================
-# Routes: Music (YuE2-3B) — v0.7.0
+# Routes: Music (YuE2-3B) — added v0.7.0
 
 @app.get("/music", response_class=HTMLResponse)
 async def music_page():
