@@ -32,7 +32,7 @@ from engine.parsers import parse_epub
 from engine.chunker import split_into_chunks
 
 EPUB_PATH = _REPO_DIR / "test_ebooks" / "The Wonderful Wizard of Oz by L. Frank Baum.epub"
-VOICE_REF = _REPO_DIR / "_voices" / "pixel.wav"
+VOICE_REF = _REPO_DIR / "voice_clones" / "vera.mp3"
 OUTPUT_DIR = _REPO_DIR / "test_output"
 
 

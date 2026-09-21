@@ -33,7 +33,7 @@ class Voice(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    voice_type: Mapped[str] = mapped_column(String, nullable=False)  # 'designed', 'cloned', ''
+    voice_type: Mapped[str] = mapped_column(String, nullable=False)  # 'designed', 'cloned'
     sample_audio_path: Mapped[str | None] = mapped_column(Text)
     ref_audio_path: Mapped[str | None] = mapped_column(Text)
     ref_text: Mapped[str | None] = mapped_column(Text)
@@ -45,7 +45,7 @@ class Voice(Base):
 class DeletedVoiceSlug(Base):
     """Tombstone for a voice the user deliberately deleted.
 
-    scan_voice_clones() and seed_voices() re-import anything missing from
+    scan_voice_clones() re-imports anything missing from
     `voices` on every startup and every Refresh click — without a tombstone a
     deleted bundled voice resurrects on the next restart. Creating a voice
     through the UI (or import_voices) clears its tombstone: an explicit add

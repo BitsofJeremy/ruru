@@ -40,7 +40,6 @@ from config import (
 )
 from jobs.queue import get_runner, JobType
 from models.db import init_db, get_async_session
-from models.seed_voices import seed_voices
 from models.scan_voice_clones import scan_voice_clones
 
 # =============================================================================
@@ -112,7 +111,6 @@ import asyncio
 async def app_lifespan(app):
     """FastAPI lifespan handler — replaces deprecated on_event."""
     await init_db(DB_PATH)
-    seed_voices(DB_PATH, _REPO_ROOT, VOICE_DIR)
     try:
         scan_voice_clones(DB_PATH, _REPO_ROOT / "voice_clones", VOICE_DIR)
     except Exception:
@@ -511,9 +509,9 @@ async def voice_delete(voice_id: int):
         await session.execute(
             sqlalchemy.update(Job).where(Job.voice_id == voice_id).values(voice_id=None)
         )
-        # Tombstone the slug: the startup scan and Refresh re-import anything
-        # from voice_clones/ (and seed_voices re-imports  characters)
-        # whose row is missing — without this the voice resurrects on restart.
+        # Tombstone the slug: the startup scan re-imports anything
+        # from voice_clones/ whose row is missing — without this the voice
+        # resurrects on restart.
         session.add(DeletedVoiceSlug(slug=voice.slug))
         await session.delete(voice)
         await session.commit()

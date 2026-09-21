@@ -78,11 +78,6 @@ YUE2_COT = _env("YUE2_COT", "full")
 # PyTorch-runtime song length cap (seconds) — keeps peak VRAM inside 12 GB.
 YUE2_MAX_SECONDS = int(_env("YUE2_MAX_SECONDS", "90"))
 
-_REPO = Path(_env(
-    "_REPO",
-    str(Path(__file__).parent.parent.resolve())
-))
-
 
 def ensure_dirs():
     """Create all required data directories."""

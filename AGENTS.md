@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents working in this repository.
 
 ## Project Overview
 
@@ -141,7 +141,6 @@ jobs/
                         #   run_regenerate_chapter.
 models/
   db.py                 # SQLAlchemy models + set_db_path(), init_db(), get_sync_session().
-  seed_voices.py        # Optional  seeding; a no-op unless characters_data.py exists.
   scan_voice_clones.py  # Imports voice_clones/*.{mp3,wav} + matching .txt into the library.
 engine/
   __init__.py           # get_engine_class() — the backend factory (RURU_TTS_BACKEND).
@@ -191,7 +190,6 @@ All env vars use the `RURU_` prefix. Defined in `config.py`. Data lives under `W
 | `RURU_CHUNK_MAX_CHARS` | `700` | Hard character ceiling per chunk |
 | `RURU_MAX_RETRIES` | `3` | Chunk generation retry count |
 | `RURU_CREATOR_TAG` | `Created by ruru` | Audio metadata tag |
-| `RURU__REPO` | parent of repo root | Optional dir containing `characters_data.py`; seeding is skipped if absent |
 | `RURU_AUDIO_FORMAT` | `mp3` | Output format |
 | `RURU_AUDIO_BITRATE` | `128k` | Output bitrate |
 
@@ -244,13 +242,11 @@ See `docs/uninstall.md` for step-by-step teardown instructions.
 - Dark mode with custom Tailwind colors: `kj-bg`, `kj-card`, `kj-border`, `kj-accent` (purple), `kj-accent2` (teal), `kj-text`, `kj-muted`
 - HTMX for all interactivity — no custom JavaScript
 - Status badges: running = teal pulse-dot, completed = green, failed = red, queued = yellow
-- Voice type badges:  = purple, cloned = blue, designed = green
+- Voice type badges: cloned = blue, designed = green
 
 ## Character Data
 
-Voices come from `voice_clones/` — an audio file plus a same-stem `.txt` transcript (e.g. `vera.mp3` + `vera.txt`), imported into the library on startup by `models/scan_voice_clones.py`. Five example voices ship in the repo (gus, mabel, ruth, vera, wesley);  is local-only (gitignored).
-
-The  characters are optional: `seed_voices.py` imports `characters_data.py` from `RURU__REPO` if it's there, and is a **no-op when it isn't** (neither `characters_data.py` nor `_voices/` ship with this repo).
+Voices come from `voice_clones/` — an audio file plus a same-stem `.txt` transcript (e.g. `vera.mp3` + `vera.txt`), imported into the library on startup by `models/scan_voice_clones.py`. Five example voices ship in the repo: gus, mabel, ruth, vera, wesley.
 
 ## Testing
 
@@ -266,10 +262,10 @@ Platform-specific tests skip rather than fail: `tests/test_tts_engine.py`'s gene
 
 ## Known Issues
 
-See `TODO.md` for the full list. Open items: no CSRF protection (acceptable for single-user local app); the voice edit page's image upload/remove controls call `/api/voices/{id}/image`, which doesn't exist yet (404) — see `PROGRESS.md` "Session: 2026-07-10" for details.
+See `TODO.md` for the full list. Open items: no CSRF protection (acceptable for single-user local app); the voice edit page's image upload/remove controls call `/api/voices/{id}/image`, which doesn't exist yet (404).
 
 ## Project Directories
 
-- `.claude/` — Claude Code session configuration and memory
+- `.claude/` — legacy Claude Code session config (safe to ignore)
 - `.worktrees/` — Isolated git worktrees created by the `superpowers:using-git-worktrees` skill
 - `voice_clones/` — Voice clone reference audio + matching `.txt` transcripts (version-controlled)

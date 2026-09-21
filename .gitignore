@@ -1,6 +1,6 @@
-voice_clones/.mp3
-voice_clones/.prompt.txt
-voice_clones/.txt
+# Local-only voice clones (never shipped)
+voice_clones/cipher_sigil.*
+voice_clones/echo_transmit.*
 
 # Python
 __pycache__/
@@ -55,7 +55,7 @@ reference_material/
 sqlalchemy_orm_integration/
 characters_data.py
 _voices/
-hello_.mp3
+hello_ruru.mp3
 voice_clones/Neil_Hellegers_*
 voice_clones/Ray_Porter_*
 archive/private_removed_*/

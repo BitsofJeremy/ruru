@@ -108,7 +108,7 @@ class TestOrmModels:
     
             await init_db(tmp_db)
             with next(get_sync_session()) as session:
-                v = Voice(name="N", slug="n", voice_type="")
+                v = Voice(name="N", slug="n", voice_type="cloned")
                 session.add(v)
                 session.commit()
                 session.refresh(v)

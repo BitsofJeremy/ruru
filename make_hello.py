@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Generate hello_.mp3 by cloning 's voice with Qwen3-TTS (MLX).
+"""Generate hello_ruru.mp3 by cloning a bundled example voice with Qwen3-TTS.
 
-Loads the cached 8-bit Base clone model and synthesises the word "Hello" using
-'s intro WAV as the reference voice, writing an MP3 to the repo root.
+Loads the cached 8-bit Base clone model (MLX backend) and synthesises a short
+greeting using Vera's reference clip as the voice, writing an MP3 to the repo
+root. Useful as a real (non-mocked) engine smoke test.
 """
 
 from __future__ import annotations
@@ -12,19 +13,19 @@ import sys
 from pathlib import Path
 
 # Surface the engine's INFO logs so the model-load + generation trail is
-# captured on stderr (matches TODO.md's verification log line).
+# captured on stderr.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     stream=sys.stderr,
 )
 
-from engine.tts import TTSEngine  # noqa: E402
+from engine import get_engine_class  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent
-REF_AUDIO = REPO_ROOT / "voice_clones" / ".mp3"
-REF_TEXT = REPO_ROOT / "voice_clones" / ".txt"
-OUTPUT = REPO_ROOT / "hello_.mp3"
+REF_AUDIO = REPO_ROOT / "voice_clones" / "vera.mp3"
+REF_TEXT = REPO_ROOT / "voice_clones" / "vera.txt"
+OUTPUT = REPO_ROOT / "hello_ruru.mp3"
 TEXT = """You're here because you already know. Hello."""
 LANGUAGE = "English"
 
@@ -41,7 +42,7 @@ def main() -> int:
         file=sys.stderr,
     )
 
-    engine = TTSEngine()
+    engine = get_engine_class()()
     written = engine.generate_to_file(
         text=TEXT,
         output_path=OUTPUT,

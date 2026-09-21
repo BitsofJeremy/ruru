@@ -45,11 +45,12 @@ output_dir = OUTPUT_DIR
 def _should_clone(payload: dict) -> bool:
     """Decide clone vs design routing based on a usable ref_audio_path.
 
-    Routing by the ``voice_type`` *label* is unreliable: seeded voices are typed
-    '' yet carry a real reference audio file, so the label-based check
-    silently funnels every clone-capable voice into the VoiceDesign branch and
-    ignores its ref audio. Route on whether a reference audio file actually
-    exists on disk instead, falling back to design for anything missing.
+    Routing by the ``voice_type`` *label* is unreliable: a voice can carry any
+    label yet have (or lack) a real reference audio file, so a label-based
+    check can silently funnel clone-capable voices into the VoiceDesign branch
+    and ignore their ref audio. Route on whether a reference audio file
+    actually exists on disk instead, falling back to design for anything
+    missing.
     """
     ref_audio = payload.get("ref_audio_path") or ""
     return bool(ref_audio) and Path(ref_audio).is_file()

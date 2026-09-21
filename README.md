@@ -7,7 +7,7 @@
 
 ---
 
-Audiobook narration engine powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) running **entirely on your own hardware**. Upload documents, pick a voice, and generate full audiobooks with local text-to-speech.
+Audiobook narration engine powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) running **entirely on your own hardware**. Upload documents, pick a voice, and generate full audiobooks with local text-to-speech. v0.7.0 adds music generation — 48 kHz stereo songs via [YuE2-3B](https://huggingface.co/m-a-p/YuE2-3B) on the same hardware.
 
 Two interchangeable GPU backends, selected with `RURU_TTS_BACKEND`:
 
@@ -18,7 +18,7 @@ Two interchangeable GPU backends, selected with `RURU_TTS_BACKEND`:
 
 Everything above the engine — jobs, database, routes, templates — is shared. Both backends satisfy one interface (`engine/base.py`), enforced by a contract test suite that runs on either platform.
 
-ruru is a single-user web application built with FastAPI and HTMX. It ships with five example voices — **Gus**, **Mabel**, **Ruth**, **Vera**, and **Wesley**, a cast of callers and archivists from a late-night radio show about the impossible — and supports creating new voices via voice cloning or voice design. (-style character-voice bulk seeding is an optional, local-only feature for developers who supply their own `characters_data.py` — it is not part of the public release.)
+ruru is a single-user web application built with FastAPI and HTMX. It ships with five example voices — **Gus**, **Mabel**, **Ruth**, **Vera**, and **Wesley**, a cast of callers and archivists from a late-night radio show about the impossible — and supports creating new voices via voice cloning or voice design.
 
 The name is a nod to ruru, the morepork owl — known for its distinctive two-note night call, fitting for a tool that runs overnight turning books into audio.
 
@@ -46,14 +46,15 @@ The name is a nod to ruru, the morepork owl — known for its distinctive two-no
 | Python | >= 3.10 | Tested on 3.12 |
 | [uv](https://docs.astral.sh/uv/) | latest | Package runner — no pip needed |
 | ffmpeg | any recent | Audio format conversion (pydub) |
+| Disk | ~16 GB+ | TTS weights ~5 GB; YuE2 music weights ~5 GB more (downloaded on demand) |
 | Nginx | optional | Reverse proxy for production |
 
 Plus **one** of:
 
 | Backend | Requirement | Notes |
 |---|---|---|
-| `mlx` | Apple Silicon (M-series), 16 GB+ unified memory recommended | Install with `uv sync --extra mlx`. MLX runs on the Apple GPU; the 1.7B 8-bit models peak around ~7 GB |
-| `cuda` | NVIDIA GPU, ~5 GB free VRAM | Install with `uv sync --extra cuda`. Each bf16 1.7B model is ~4-5 GB; only one is held resident at a time, so a competing GPU workload can still cause an OOM |
+| `mlx` | Apple Silicon (M-series), 16 GB+ unified memory recommended | Install with `uv sync --extra mlx`. MLX runs on the Apple GPU; the 1.7B 8-bit models peak around ~7 GB. MLX music runtime peaks around 23 GB unified memory |
+| `cuda` | NVIDIA GPU, ~5 GB free VRAM | Install with `uv sync --extra cuda`. Each bf16 1.7B model is ~4-5 GB; only one is held resident at a time, so a competing GPU workload can still cause an OOM. Music (YuE2) needs more: ~7–8 GB peak with the GGUF runtime, 11–14 GB with PyTorch |
 
 ## Quick start
 
@@ -66,6 +67,22 @@ uv run app.py
 uv sync --extra cuda
 RURU_TTS_BACKEND=cuda uv run app.py
 ```
+
+Music generation (YuE2) works on either backend and downloads its weights on
+first use — or pre-fetch them, e.g. the GGUF runtime on Linux:
+
+```bash
+uv run python -c "
+from huggingface_hub import snapshot_download
+snapshot_download('audio-cpp/Yue2-3B-GGUF',
+    allow_patterns=['yue2-3b-q4_k_m.gguf','yue2-vae-f16.gguf','sidecars/*'],
+    local_dir='data/models/yue2-gguf')"
+```
+
+The `gguf` runtime also needs an `audio.cpp` binary (dev branch, built from
+source) pointed at by `RURU_YUE2_AUDIOCPP_BIN`. On macOS the MLX runtime needs
+no extra binary. Full details, runtimes, VRAM numbers, and the instrumental
+LoRA: see [Music](#music-yue2-3b--v070) below.
 
 Open [http://localhost:5151](http://localhost:5151) in your browser. The sidebar shows which backend is active.
 
@@ -157,7 +174,6 @@ jobs/
   tasks.py           # TTS generation tasks (generate_tts, narrate_document)
 models/
   db.py              # SQLAlchemy models + schema (voices, jobs, chapters)
-  seed_voices.py     # Optional  character voice seeding (local-only)
   scan_voice_clones.py # Imports every voice_clones/ audio+transcript pair on startup
   import_voices.py   # Migrate a voice library from another install
 engine/
@@ -166,6 +182,8 @@ engine/
   result.py          # TTSResult — tuple-unpackable as (wav, sr), plus .write()
   mlx_engine.py      # MLXEngine — Apple Silicon, via mlx-audio
   cuda_engine.py     # CUDAEngine — NVIDIA, via qwen-tts + torch
+  yue2_engine.py     # YuE2Engine — music generation (gguf/pytorch/mlx runtimes)
+  yue2_lora.py       # Vendored instrumental-LoRA merge for YuE2
   tts.py             # Back-compat shim re-exporting MLXEngine as TTSEngine
   parsers.py         # EPUB and TXT document parsing
   chunker.py         # Sentence-boundary-aware text splitting
@@ -341,6 +359,4 @@ LoRA and no realistic path to one until the MLX port grows adapter support.
 ## License
 
 GNU AFFERO GENERAL PUBLIC LICENSE
-## Contributors
 
-- [](https://github.com/) — Linux build testing and the CUDA backend

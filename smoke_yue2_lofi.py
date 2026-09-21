@@ -6,6 +6,7 @@ Not a pytest test (no test_ prefix) — real GPU work.
 """
 import time
 import logging
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
@@ -32,7 +33,7 @@ def main():
     )
     wav, sr = result
     dur = len(wav) / sr
-    out = result.write("/home//repos/ruru/data/output/yue2_lofi_30s.wav")
+    out = result.write(str(Path(__file__).resolve().parent / "data/output/yue2_lofi_30s.wav"))
     print(f"DONE in {time.time()-t0:.0f}s wall — {dur:.1f}s of audio @ {sr} Hz")
     print(f"Wrote {out}")
     print(f"Peak VRAM: {torch.cuda.max_memory_allocated()/2**30:.2f} GiB")

@@ -44,9 +44,7 @@
             <div class="p-4 space-y-2 flex flex-col flex-1">
                 <div class="flex items-center justify-between">
                     <h3 class="text-lg font-semibold">{{ voice.name }}</h3>
-                    {% if voice.voice_type == "" %}
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-500/20 text-purple-400"></span>
-                    {% elif voice.voice_type == "cloned" %}
+                    {% if voice.voice_type == "cloned" %}
                         <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 text-blue-400">cloned</span>
                     {% elif voice.voice_type == "designed" %}
                         <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/20 text-green-400">designed</span>
@@ -83,7 +81,7 @@
                 </div>
                 {% endif %}
 
-                {% if voice.voice_type != "" %}
+                {% if voice.voice_type != "designed" %}
                 <div class="mt-auto pt-3 flex gap-2">
                     <a href="/voice/{{ voice.id }}/edit"
                        class="flex-1 px-3 py-1.5 bg-kj-accent/10 hover:bg-kj-accent/20 text-kj-accent text-sm rounded-lg border border-kj-accent/20 transition-colors text-center">

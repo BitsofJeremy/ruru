@@ -107,7 +107,7 @@ class TestParseTxt:
         opening line of narration was silently swallowed as a 'title')."""
         f = tmp_path / "narration.txt"
         f.write_text(
-            "Good evening. I'm , and these are Letters to .\n\n"
+            "Good evening. You're listening to the night desk.\n\n"
             "More narration text follows here."
         )
         chapters = parse_txt(f)
@@ -149,7 +149,7 @@ class TestParseTxt:
     def test_verbatim_mode_preserves_sentence_first_line_too(self, tmp_path):
         f = tmp_path / "narration.txt"
         f.write_text(
-            "Good evening. I'm , and these are Letters to .\n\n"
+            "Good evening. You're listening to the night desk.\n\n"
             "More narration text follows here."
         )
         chapters = parse_txt(f, verbatim=True)

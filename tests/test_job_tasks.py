@@ -32,7 +32,7 @@ def job_db(tmp_db, tmp_work_dir):
         voice = Voice(
             name="Test Voice",
             slug="test-voice",
-            voice_type="",
+            voice_type="cloned",
             description="A calm voice",
             speaking_style="calm",
             emotional_range="[]",
@@ -68,7 +68,8 @@ class TestRunGenerateTTS:
     @patch("engine.get_engine_class")
     def test_clone_when_ref_audio_exists(self, mock_get_engine_class, task_env, tmp_path):
         """A payload whose ref_audio_path points to a real file routes to clone,
-        even though voice_type is the seeded '' label (BUG 1)."""
+        even though voice_type carries a non-clone label (routing must use the
+        ref audio, not the label)."""
         from jobs.tasks import run_generate_tts
 
         ref = tmp_path / "ref.wav"
@@ -81,7 +82,7 @@ class TestRunGenerateTTS:
 
         result = run_generate_tts(
             task_env["job_id"],
-            text="Hello world", voice_id=1, voice_type="",
+            text="Hello world", voice_id=1, voice_type="cloned",
             ref_audio_path=str(ref), ref_text="Reference text",
             audio_format="wav",
         )
@@ -94,8 +95,8 @@ class TestRunGenerateTTS:
 
     @patch("engine.get_engine_class")
     def test_design_when_ref_audio_missing(self, mock_get_engine_class, task_env):
-        """No usable ref audio on disk -> design branch (the original bug: every
-        '' voice wrongly took design, but here it is the correct call)."""
+        """No usable ref audio on disk -> design branch (routing must not force
+        the clone branch on a label alone when the ref audio is missing)."""
         from jobs.tasks import run_generate_tts
 
         audio = fake_audio()
@@ -105,7 +106,7 @@ class TestRunGenerateTTS:
 
         result = run_generate_tts(
             task_env["job_id"],
-            text="Hello world", voice_id=1, voice_type="",
+            text="Hello world", voice_id=1, voice_type="cloned",
             ref_audio_path="/does/not/exist.wav",  # missing -> design
             voice_description="A calm British male voice",
             audio_format="wav",
@@ -253,7 +254,7 @@ class TestRunRegenerateChapter:
 
         result = run_regenerate_chapter(
             task_env["job_id"],
-            chapter_id=3, text="New chapter text", voice_type="",
+            chapter_id=3, text="New chapter text", voice_type="cloned",
             ref_audio_path=str(ref), ref_text="ref",
         )
 

@@ -98,7 +98,7 @@ stop_service() {
     fi
 
     # Kill stragglers — a manually started `uv run ruru` will otherwise keep
-    # holding the port out from under the service (see CLAUDE.md pitfalls).
+    # holding the port out from under the service (see AGENTS.md pitfalls).
     pkill -f "\.venv/bin/ruru" 2>/dev/null || true
     pkill -f "python.*app\.py" 2>/dev/null || true
     sleep 0.5
