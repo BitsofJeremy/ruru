@@ -45,6 +45,11 @@ def test_instrumental_forces_pytorch_runtime(monkeypatch):
     monkeypatch.setattr("config.YUE2_RUNTIME", "gguf")
     monkeypatch.setattr("config.YUE2_INST_LORA_SCALE", 1.0)
     monkeypatch.setattr("config.YUE2_MAX_SECONDS", 90)
+    # the pipeline is faked below, so the real preflight (yue2 wheel + CUDA)
+    # must be bypassed too — on a Mac it would refuse before reaching it.
+    monkeypatch.setattr(
+        YuE2Engine, "_pytorch_ready", staticmethod(lambda: (True, ""))
+    )
     eng = YuE2Engine()
     merged = {}
     real_mkdtemp = _tempfile.mkdtemp
@@ -153,6 +158,9 @@ def test_gguf_unready_falls_back_to_pytorch(monkeypatch, mocker, linux_platform)
 
     monkeypatch.setattr("config.YUE2_RUNTIME", "")   # auto -> gguf on linux
     monkeypatch.setattr("config.YUE2_AUDIOCPP_BIN", "")  # not configured
+    monkeypatch.setattr(
+        YuE2Engine, "_pytorch_ready", staticmethod(lambda: (True, ""))
+    )
     eng = YuE2Engine()
     assert eng._resolve_runtime() == "gguf"
 
@@ -207,6 +215,9 @@ def test_pytorch_lora_flag_selects_merge(monkeypatch, mocker):
     monkeypatch.setattr("config.YUE2_RUNTIME", "pytorch")
     monkeypatch.setattr("config.YUE2_INST_LORA_SCALE", 1.0)
     monkeypatch.setattr("config.YUE2_MAX_SECONDS", 90)
+    monkeypatch.setattr(
+        YuE2Engine, "_pytorch_ready", staticmethod(lambda: (True, ""))
+    )
     eng = YuE2Engine()
     real_mkdtemp = _tempfile.mkdtemp
 
@@ -278,3 +289,29 @@ def test_mlx_runtime_rejected_on_linux(monkeypatch, linux_platform):
     eng = YuE2Engine()
     with pytest.raises(RuntimeError, match="macOS-only"):
         eng.generate(style="s", lyrics="[instrumental]")
+
+
+def test_instrumental_without_pytorch_runtime_raises_clear_error(
+    monkeypatch, mocker
+):
+    """Mac default: auto runtime is mlx, Instrumental forces pytorch, but the
+    yue2 wheel isn't installed (mlx/cuda extras conflict). The error must name
+    the Instrumental checkbox — not a bare ModuleNotFoundError."""
+    monkeypatch.setattr("config.YUE2_RUNTIME", "")
+    monkeypatch.setattr(
+        "engine.yue2_engine.platform.system", lambda: "Darwin"
+    )
+    eng = YuE2Engine()
+    monkeypatch.setattr(eng, "_pytorch_ready", staticmethod(lambda: (False, "yue2 wheel not installed")))
+    with pytest.raises(RuntimeError, match="Instrumental"):
+        eng.generate(style="s", lyrics="[instrumental]", instrumental=True)
+
+
+def test_explicit_pytorch_without_runtime_raises_reinstall_hint(monkeypatch):
+    """Linux: uv sync prunes the --no-deps yue2_infer wheel. The error must
+    point at the README reinstall step, not ModuleNotFoundError."""
+    monkeypatch.setattr("config.YUE2_RUNTIME", "pytorch")
+    eng = YuE2Engine()
+    monkeypatch.setattr(eng, "_pytorch_ready", staticmethod(lambda: (False, "no CUDA")))
+    with pytest.raises(RuntimeError, match="uv sync"):
+        eng.generate(style="s", lyrics="[verse]")

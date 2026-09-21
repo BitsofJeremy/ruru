@@ -709,7 +709,12 @@ async def music_page():
         active_jobs_count = await session.scalar(
             sqlalchemy.select(func.count()).select_from(Job).where(Job.status.in_(('queued', 'running')))
         )
-    return HTMLResponse(render("music.html", active_jobs_count=active_jobs_count))
+    from engine.yue2_engine import YuE2Engine
+    return HTMLResponse(render(
+        "music.html",
+        active_jobs_count=active_jobs_count,
+        instrumental_available=YuE2Engine._pytorch_ready()[0],
+    ))
 
 @app.post("/api/music", response_class=HTMLResponse)
 async def api_music(request: Request):
@@ -747,7 +752,12 @@ async def api_music(request: Request):
     }
     runner = get_runner()
     future = await runner.enqueue(job_id, JobType.GENERATE_MUSIC, payload)
-    result = await future
+    try:
+        result = await future
+    except Exception as e:
+        # Job exceptions land on the future (queue.py) — surface the message
+        # as the same failure fragment instead of a blank generic 500 page.
+        result = {"status": "failed", "message": str(e)}
 
     if result.get("status") == "completed":
         audio_name = Path(result["output_path"]).name

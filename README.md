@@ -347,8 +347,9 @@ export RURU_YUE2_AUDIOCPP_BIN=/path/to/audiocpp/binary
 > uv pip install --python .venv/bin/python --no-deps ./yue2_infer-0.1.5-py3-none-any.whl tiktoken
 > ```
 > (Download the wheel from the `m-a-p/YuE2-3B` HF repo.) Symptom if forgotten:
-> `ModuleNotFoundError: No module named 'yue2'` in the ruru-web journal when a
-> music job runs.
+> the Music page shows the Instrumental checkbox as unavailable, and an
+> instrumental request fails with a "reinstall per README" error instead of a
+> bare `ModuleNotFoundError: No module named 'yue2'`.
 
 Knobs: `RURU_YUE2_RUNTIME` (gguf/pytorch/mlx/"" = auto),
 `RURU_YUE2_MAX_SECONDS` (90; drop to 60 if the 12 GB card OOMs),

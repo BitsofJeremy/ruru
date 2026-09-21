@@ -37,11 +37,21 @@
 
                 <!-- Instrumental LoRA toggle -->
                 <div class="flex items-center gap-2">
+                    {% if instrumental_available %}
                     <input type="checkbox" name="instrumental" id="instrumental" checked
                            class="h-4 w-4 rounded border-kj-border bg-kj-bg text-kj-accent">
                     <label for="instrumental" class="text-sm text-kj-muted">
                         Instrumental (LoRA — uses the PyTorch runtime, slower)
                     </label>
+                    {% else %}
+                    <input type="checkbox" name="instrumental" id="instrumental" disabled
+                           class="h-4 w-4 rounded border-kj-border bg-kj-bg text-kj-accent opacity-40">
+                    <label for="instrumental" class="text-sm text-kj-muted/70">
+                        Instrumental (LoRA) — unavailable on this machine (needs the
+                        PyTorch/CUDA runtime; no LoRA support on macOS). Songs generate
+                        without the LoRA here.
+                    </label>
+                    {% endif %}
                 </div>
 
                 <!-- Seed -->

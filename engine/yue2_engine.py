@@ -66,6 +66,57 @@ class YuE2Engine:
 
         return (config.YUE2_RUNTIME or "").strip().lower()
 
+    @staticmethod
+    def _pytorch_ready() -> tuple[bool, str]:
+        """(ready, reason) — is the yue2_infer wheel + CUDA actually usable?
+
+        Cached on the class: importing torch takes seconds, and both the
+        music page render and every pytorch dispatch ask this. The mlx/cuda
+        extras conflict (pyproject), so on macOS this is (False, ...) forever:
+        there is no LoRA path on Apple Silicon.
+        """
+        cached = YuE2Engine.__dict__.get("_pytorch_ready_cache")
+        if cached is not None:
+            return cached
+        try:
+            import yue2  # noqa: F401
+        except ImportError:
+            result = (False, "the yue2_infer wheel is not installed")
+        else:
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    result = (True, "")
+                else:
+                    result = (False, "no CUDA device available")
+            except ImportError:
+                result = (False, "torch is not installed")
+        YuE2Engine._pytorch_ready_cache = result
+        return result
+
+    @staticmethod
+    def _pytorch_unavailable_error(reason: str, *, instrumental: bool) -> RuntimeError:
+        """Actionable error for a pytorch dispatch that cannot run here.
+
+        The two real-world failure modes: macOS (mlx/cuda extras conflict,
+        MLX port has no LoRA support) and Linux after `uv sync` pruned the
+        --no-deps yue2_infer wheel. Both used to surface as a raw
+        ModuleNotFoundError / torch error.
+        """
+        if instrumental:
+            return RuntimeError(
+                "Instrumental LoRA is only supported by the PyTorch (CUDA) "
+                f"runtime, which is unavailable here ({reason}). macOS has no "
+                "LoRA path at all — uncheck Instrumental to generate with the "
+                "local runtime instead."
+            )
+        return RuntimeError(
+            f"YuE2 PyTorch runtime unavailable ({reason}). The yue2_infer "
+            "wheel is installed --no-deps outside the lockfile: if uv sync "
+            "pruned it, reinstall per README 'Music (YuE2)'."
+        )
+
     # -- generation ---------------------------------------------------------
     def generate(
         self,
@@ -97,6 +148,11 @@ class YuE2Engine:
         if runtime == "gguf":
             return self._generate_gguf(style, lyrics, seed, cot)
         if runtime == "pytorch":
+            ready, reason = self._pytorch_ready()
+            if not ready:
+                raise self._pytorch_unavailable_error(
+                    reason, instrumental=instrumental
+                )
             return self._generate_pytorch(style, lyrics, instrumental, seed, cot)
         if runtime == "mlx":
             return self._generate_mlx(style, lyrics, seed, cot)
