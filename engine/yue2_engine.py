@@ -20,6 +20,7 @@ import logging
 import platform
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -288,13 +289,20 @@ class YuE2Engine:
         with tempfile.TemporaryDirectory(prefix="ruru_yue2_") as td:
             out = Path(td) / "song.wav"
             cmd = [
-                "python", str(mlx_dir / "generate.py"),
+                # sys.executable, not "python": the launchd PATH has no bare
+                # `python`, and the venv interpreter is the one holding mlx +
+                # tiktoken that generate.py needs.
+                sys.executable, str(mlx_dir / "generate.py"),
                 "--model", "8bit", "--style", style, "--lyrics", lyrics,
                 "--cot", cot or config.YUE2_COT, "--out", str(out),
             ]
             if seed is not None:
                 cmd += ["--seed", str(seed)]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            # cwd=mlx_dir: generate.py resolves the relative "--model 8bit"
+            # against the subprocess cwd, not its own script dir.
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=3600, cwd=str(mlx_dir)
+            )
             if proc.returncode != 0:
                 raise RuntimeError(f"MLX YuE2 failed: {proc.stderr[-2000:]}")
             return self._read_result_wav(out)

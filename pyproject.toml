@@ -22,7 +22,9 @@ dependencies = [
 
 [project.optional-dependencies]
 mlx  = ["mlx ; sys_platform == 'darwin'",
-        "mlx-audio>=0.4.4 ; sys_platform == 'darwin'"]
+        "mlx-audio>=0.4.4 ; sys_platform == 'darwin'",
+        # YuE2 MLX runtime: ahmadw/YuE2-3B-MLX generate.py tokenizes with tiktoken
+        "tiktoken ; sys_platform == 'darwin'"]
 cuda = ["torch>=2.0.0", "qwen-tts"]
 
 [tool.uv]

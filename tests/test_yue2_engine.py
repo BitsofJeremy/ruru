@@ -1,4 +1,6 @@
 """YuE2Engine tests — GPU never touched: subprocess and pipeline are faked."""
+from pathlib import Path
+
 import numpy as np
 import pytest
 import soundfile as sf
@@ -96,6 +98,39 @@ def test_gguf_runtime_runs_subprocess(monkeypatch, linux_platform, fake_wav):
     assert sr == 48000
     assert len(wav) == 48000
     assert "/fake/bin/audiocpp" in " ".join(str(c) for c in calls["cmd"])
+
+
+def test_mlx_runtime_runs_subprocess(monkeypatch, fake_wav):
+    """MLX subprocess must run the current interpreter (the launchd PATH has
+    no bare `python`) with cwd at the MLX dir (generate.py resolves the
+    relative --model path against the subprocess cwd)."""
+    import sys
+
+    eng = YuE2Engine()
+    calls = {}
+
+    def fake_run(cmd, **kw):
+        calls["cmd"] = cmd
+        calls["kw"] = kw
+
+        class R:
+            returncode = 0
+            stderr = ""
+
+        return R()
+
+    monkeypatch.setattr(
+        "engine.yue2_engine.platform.system", lambda: "Darwin"
+    )
+    monkeypatch.setattr("config.MLX_MODELS_PATH", str(fake_wav.parent))
+    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr(eng, "_read_result_wav", lambda p: (np.zeros(1), 48000))
+    result = eng.generate(style="s", lyrics="[instrumental]")
+    assert result is not None
+    cmd0 = str(calls["cmd"][0])
+    assert cmd0 == sys.executable
+    assert calls["kw"].get("cwd", "").endswith("YuE2-3B-MLX")
+    assert any("generate.py" in str(c) for c in calls["cmd"])
 
 
 def test_gguf_missing_binary_raises_clear_error(monkeypatch, tmp_path):
