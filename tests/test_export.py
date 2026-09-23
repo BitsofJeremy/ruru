@@ -1,6 +1,7 @@
 """Tests for engine/export.py — multi-format encode_variants."""
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -107,6 +108,39 @@ def test_encode_variants_lossy_uses_pydub_mp4_name_for_m4a(tmp_path):
         mock_cls.from_file.return_value = segment
         encode_variants(result, tmp_path / "song", ["mp3"], bitrate="192k")
     assert calls == [{"format": "mp3", "bitrate": "192k"}]
+
+
+def test_encode_variants_publishes_only_after_all_encodes(tmp_path):
+    """Publish goes through shutil.move, and only once every encode is done."""
+    from engine.export import encode_variants
+
+    with patch("shutil.move", wraps=shutil.move) as mock_move:
+        with patch("pydub.AudioSegment") as mock_cls:
+            segment = MagicMock()
+
+            def fake_export(path, **kwargs):
+                # Every encode runs against the staging dir; the publish
+                # step must not have started before all of them are done.
+                assert not mock_move.called, (
+                    "publish started before all encodes finished"
+                )
+                Path(path).write_bytes(b"encoded")
+
+            segment.export.side_effect = fake_export
+            mock_cls.from_file.return_value = segment
+
+            result = TTSResult(MOCK_WAV, 24000)
+            out = encode_variants(result, tmp_path / "song", ["mp3", "m4a"])
+
+    # shutil.move (not os.replace) is the publish mechanism — os.replace
+    # raises EXDEV when the temp dir and destination are on different
+    # filesystems (tmpfs /tmp vs disk-backed WORK_DIR on Linux prod).
+    assert mock_move.call_count == 2
+    moved = {Path(c.args[1]).name for c in mock_move.call_args_list}
+    assert moved == {"song.mp3", "song.m4a"}
+    assert set(out) == {"mp3", "m4a"}
+    assert out["mp3"].exists()
+    assert out["m4a"].exists()
 
 
 @pytest.mark.parametrize(

@@ -7,7 +7,7 @@ succeeded, so a missing ffmpeg never leaves half-written outputs behind.
 from __future__ import annotations
 
 import logging
-import os
+import shutil
 import tempfile
 from io import BytesIO
 from pathlib import Path
@@ -81,12 +81,15 @@ def encode_variants(
                 _encode_lossy(result, staged_path, fmt, bitrate)
             staged[fmt] = staged_path
 
-        # -- all encodes succeeded: publish atomically -----------------------
+        # -- all encodes succeeded: publish to the destination --------------
+        # shutil.move renames in place on the same filesystem and falls back
+        # to copy+delete across devices (e.g. tmpfs /tmp staging vs a
+        # disk-backed destination), where os.replace would raise EXDEV.
         stem.parent.mkdir(parents=True, exist_ok=True)
         outputs: dict[str, Path] = {}
         for fmt, staged_path in staged.items():
             dest = stem.with_suffix(f".{fmt}")
-            os.replace(staged_path, dest)
+            shutil.move(str(staged_path), str(dest))
             outputs[fmt] = dest
 
     logger.info("Exported: %s", ", ".join(str(p) for p in outputs.values()))
