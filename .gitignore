@@ -1,6 +1,8 @@
 # Local-only voice clones (never shipped)
 voice_clones/cipher_sigil.*
 voice_clones/echo_transmit.*
+voice_clones/lilith*
+
 
 # Python
 __pycache__/
