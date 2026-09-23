@@ -22,6 +22,56 @@ def linux_platform(monkeypatch):
     monkeypatch.setattr("engine.yue2_engine.platform.system", lambda: "Linux")
 
 
+@pytest.fixture
+def fake_mlx(monkeypatch, fake_wav):
+    """Force the MLX runtime with a captured, always-successful subprocess.
+    Returns (engine, calls); calls["cmds"] is the list of argv lists."""
+    calls = {"cmds": []}
+
+    def fake_run(cmd, **kw):
+        calls["cmds"].append(cmd)
+        calls["kw"] = kw
+
+        class R:
+            returncode = 0
+            stderr = ""
+
+        return R()
+
+    monkeypatch.setattr("config.YUE2_RUNTIME", "mlx")
+    monkeypatch.setattr("engine.yue2_engine.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("config.MLX_MODELS_PATH", str(fake_wav.parent))
+    monkeypatch.setattr("subprocess.run", fake_run)
+    eng = YuE2Engine()
+    monkeypatch.setattr(eng, "_read_result_wav", lambda p: (np.zeros(1), 48000))
+    return eng, calls
+
+
+@pytest.fixture
+def fake_gguf(monkeypatch, fake_wav):
+    """Force the explicit gguf runtime with a captured, always-successful
+    subprocess. Returns (engine, calls); calls["cmds"] is the argv list list."""
+    calls = {"cmds": []}
+
+    def fake_run(cmd, **kw):
+        calls["cmds"].append(cmd)
+
+        class R:
+            returncode = 0
+            stderr = ""
+
+        return R()
+
+    monkeypatch.setattr("config.YUE2_RUNTIME", "gguf")
+    monkeypatch.setattr("config.YUE2_AUDIOCPP_BIN", "/fake/bin/audiocpp")
+    monkeypatch.setattr("config.YUE2_GGUF_DIR", fake_wav.parent)
+    (fake_wav.parent / "yue2-3b-q4_k_m.gguf").write_bytes(b"x")
+    monkeypatch.setattr("subprocess.run", fake_run)
+    eng = YuE2Engine()
+    monkeypatch.setattr(eng, "_gguf_output_target", lambda d: fake_wav)
+    return eng, calls
+
+
 def test_auto_runtime_is_gguf_on_linux(monkeypatch, linux_platform):
     monkeypatch.setattr("config.YUE2_RUNTIME", "")
     eng = YuE2Engine()
@@ -315,3 +365,112 @@ def test_explicit_pytorch_without_runtime_raises_reinstall_hint(monkeypatch):
     monkeypatch.setattr(eng, "_pytorch_ready", staticmethod(lambda: (False, "no CUDA")))
     with pytest.raises(RuntimeError, match="uv sync"):
         eng.generate(style="s", lyrics="[verse]")
+
+
+# -- advanced kwargs (cfg_scale / steps / max_seconds) ------------------------
+
+
+def _flag(cmd, name):
+    """Value following a CLI flag in an argv list (None when absent)."""
+    cmd = [str(c) for c in cmd]
+    try:
+        return cmd[cmd.index(name) + 1]
+    except ValueError:
+        return None
+
+
+def test_mlx_cmd_includes_advanced_flags(fake_mlx):
+    """cfg_scale/steps/max_seconds/seed/cot all reach the MLX argv when set..."""
+    eng, calls = fake_mlx
+    eng.generate(
+        style="s",
+        lyrics="[instrumental]",
+        cot="melody",
+        cfg_scale=1.5,
+        steps=16,
+        max_seconds=240,
+        seed=7,
+    )
+    cmd = calls["cmds"][0]
+    assert _flag(cmd, "--cot") == "melody"
+    assert _flag(cmd, "--cfg-scale") == "1.5"
+    assert _flag(cmd, "--steps") == "16"
+    assert _flag(cmd, "--max-semantic-tokens") == "6000"  # 240s * 25 fps
+    assert _flag(cmd, "--seed") == "7"
+
+    # ...and are omitted entirely when None (blank-field compatibility).
+    eng.generate(style="s", lyrics="[instrumental]")
+    cmd2 = [str(c) for c in calls["cmds"][1]]
+    for name in ("--seed", "--cfg-scale", "--steps", "--max-semantic-tokens"):
+        assert name not in cmd2
+
+
+def test_gguf_forwards_cot_request_option(fake_gguf):
+    """cot rides the existing --request-option cot= channel; the default falls
+    back to config.YUE2_COT. gguf gets no cfg/steps/length flags at all."""
+    import config
+
+    eng, calls = fake_gguf
+    eng.generate(style="s", lyrics="[verse]", cot="melody")
+    assert _flag(calls["cmds"][0], "--request-option") == "cot=melody"
+
+    eng.generate(style="s", lyrics="[verse]")
+    assert _flag(calls["cmds"][1], "--request-option") == f"cot={config.YUE2_COT}"
+
+
+def test_max_seconds_overrides_pytorch_cap(monkeypatch):
+    """max_seconds wins over the config default for the pytorch runtime;
+    blank falls back to config.YUE2_MAX_SECONDS (90)."""
+    monkeypatch.setattr("config.YUE2_RUNTIME", "pytorch")
+    monkeypatch.setattr("config.YUE2_MAX_SECONDS", 90)
+    monkeypatch.setattr(
+        YuE2Engine, "_pytorch_ready", staticmethod(lambda: (True, ""))
+    )
+    eng = YuE2Engine()
+    seen = []
+    monkeypatch.setattr(
+        YuE2Engine,
+        "_cap_lyrics",
+        staticmethod(
+            lambda lyrics, *, cap_seconds: seen.append(cap_seconds) or lyrics
+        ),
+    )
+    monkeypatch.setattr(eng, "_generate_pytorch", lambda *a, **k: (np.zeros(1), 48000))
+
+    eng.generate(style="s", lyrics="[verse]", max_seconds=240)
+    assert seen == [240]
+    eng.generate(style="s", lyrics="[verse]")
+    assert seen == [240, 90]
+
+
+def test_finish_trims_to_cap(tmp_path):
+    """_finish folds stereo to mono and trims in memory to cap_seconds * sr —
+    no temp-file rewrite (the old .flac-named PCM write)."""
+    sr = 8000
+    path = tmp_path / "long.wav"
+    sf.write(
+        str(path), np.zeros((sr * 5, 2), dtype=np.float32), sr, subtype="PCM_16"
+    )
+    eng = YuE2Engine()
+    wav, out_sr = eng._finish(path, cap_seconds=2)
+    assert out_sr == sr
+    assert wav.ndim == 1  # stereo folded
+    assert len(wav) <= 2 * sr
+
+
+def test_cap_lyrics_applied_for_mlx_when_max_seconds(fake_mlx, monkeypatch):
+    """_cap_lyrics now runs for every runtime when a cap is active — mlx with
+    max_seconds=60 records cap_seconds=60; blank mlx has no cap at all."""
+    eng, calls = fake_mlx
+    seen = []
+    monkeypatch.setattr(
+        YuE2Engine,
+        "_cap_lyrics",
+        staticmethod(
+            lambda lyrics, *, cap_seconds: seen.append(cap_seconds) or lyrics
+        ),
+    )
+    eng.generate(style="s", lyrics="[intro 0:00-5:00]", max_seconds=60)
+    assert seen == [60]
+    eng.generate(style="s", lyrics="[intro 0:00-5:00]")
+    assert seen == [60]  # blank max_seconds -> no cap on the mlx runtime

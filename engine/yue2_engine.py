@@ -125,8 +125,13 @@ class YuE2Engine:
         instrumental: bool = False,
         seed: int | None = None,
         cot: str | None = None,
+        cfg_scale: float | None = None,
+        steps: int | None = None,
+        max_seconds: int | None = None,
     ) -> TTSResult:
         """Generate one song; returns a TTSResult (tuple-unpackable, .write-able)."""
+        import config
+
         runtime = self._resolve_runtime()
         explicit = bool((config_runtime := self._configured_runtime()))
         if instrumental and runtime != "pytorch":
@@ -145,17 +150,32 @@ class YuE2Engine:
                 "RURU_YUE2_AUDIOCPP_BIN) — falling back to pytorch"
             )
             runtime = "pytorch"
+        # Effective length cap, computed once after every runtime switch:
+        # per-call max_seconds always wins; the config default applies to
+        # pytorch only (12 GB VRAM headroom), so blank fields behave exactly
+        # as before.
+        cap = (
+            max_seconds
+            if max_seconds is not None
+            else (config.YUE2_MAX_SECONDS if runtime == "pytorch" else None)
+        )
+        if cap:
+            lyrics = self._cap_lyrics(lyrics, cap_seconds=cap)
+        if runtime != "mlx" and (cfg_scale is not None or steps is not None):
+            logger.info("cfg_scale/steps are MLX-only — ignoring")
         if runtime == "gguf":
-            return self._generate_gguf(style, lyrics, seed, cot)
+            return self._generate_gguf(style, lyrics, seed, cot, cap)
         if runtime == "pytorch":
             ready, reason = self._pytorch_ready()
             if not ready:
                 raise self._pytorch_unavailable_error(
                     reason, instrumental=instrumental
                 )
-            return self._generate_pytorch(style, lyrics, instrumental, seed, cot)
+            return self._generate_pytorch(style, lyrics, instrumental, seed, cot, cap)
         if runtime == "mlx":
-            return self._generate_mlx(style, lyrics, seed, cot)
+            return self._generate_mlx(
+                style, lyrics, seed, cot, cfg_scale, steps, max_seconds, cap
+            )
         raise ValueError(f"Unknown YuE2 runtime: {runtime!r}")
 
     @staticmethod
@@ -169,7 +189,10 @@ class YuE2Engine:
 
     @staticmethod
     def _cap_lyrics(lyrics: str, *, cap_seconds: int) -> str:
-        """Cap requested song length for the pytorch runtime.
+        """Cap requested song length when a length cap is active.
+
+        Called for every runtime when generate() resolves a cap (the pytorch
+        default via config.YUE2_MAX_SECONDS, or any runtime via max_seconds).
 
         The 12 GB card OOMs on long-context pytorch runs (upstream peaked at
         14 GiB). Timed section tags are the strongest length steer the LoRA
@@ -226,7 +249,9 @@ class YuE2Engine:
     def _gguf_output_target(out_dir: Path) -> Path:
         return out_dir / "song.wav"
 
-    def _generate_gguf(self, style, lyrics, seed, cot) -> TTSResult:
+    def _generate_gguf(
+        self, style, lyrics, seed, cot, cap_seconds: int | None
+    ) -> TTSResult:
         import config
 
         model_dir = Path(config.YUE2_GGUF_DIR)
@@ -254,12 +279,25 @@ class YuE2Engine:
                 raise RuntimeError(
                     f"audio.cpp failed ({proc.returncode}): {proc.stderr[-2000:]}"
                 )
-            return self._read_result_wav(out)
+            return self._finish(out, cap_seconds=cap_seconds)
 
     def _read_result_wav(self, path: Path) -> TTSResult:
         wav, sr = sf.read(str(path), dtype="float32", always_2d=False)
         if wav.ndim == 2:  # stereo -> fold to mono for TTSResult
             wav = wav.mean(axis=1)
+        return TTSResult(wav, int(sr))
+
+    def _finish(self, out_path: Path, cap_seconds: int | None) -> TTSResult:
+        """Read a runtime's output wav and apply the effective length cap.
+
+        All three runtimes end here: one read, stereo folded to mono, then an
+        in-memory trim to ``cap_seconds * sr`` when a cap is set. No temp-file
+        rewrite (the old path re-encoded the trim into a ``.flac``-named temp
+        with WAV PCM data and re-read config instead of the effective cap).
+        """
+        wav, sr = self._read_result_wav(out_path)
+        if cap_seconds is not None and len(wav) > cap_seconds * sr:
+            wav = wav[: cap_seconds * sr]
         return TTSResult(wav, int(sr))
 
     # -- pytorch (yue2_infer wheel, optional LoRA) ----------------------------
@@ -304,11 +342,12 @@ class YuE2Engine:
             "YuE2: instrumental AR LoRA folded (%d projections, scale %s)", n, scale
         )
 
-    def _generate_pytorch(self, style, lyrics, instrumental, seed, cot) -> TTSResult:
+    def _generate_pytorch(
+        self, style, lyrics, instrumental, seed, cot, cap_seconds: int | None
+    ) -> TTSResult:
         import config
 
         pipe = self._load_pytorch_pipeline(with_lora=instrumental)
-        lyrics = self._cap_lyrics(lyrics, cap_seconds=config.YUE2_MAX_SECONDS)
         gen_kwargs = {
             "style": style,
             "lyrics": lyrics,
@@ -322,21 +361,20 @@ class YuE2Engine:
             song = pipe(**gen_kwargs)
             out = Path(td) / "song.flac"
             song.save(str(out))
-            wav, sr = sf.read(str(out), dtype="float32", always_2d=False)
-            if wav.ndim == 2:
-                wav = wav.mean(axis=1)
-            return self._read_result_wav(self._trim_to_cap(out, int(sr), wav))
-
-    def _trim_to_cap(self, out: Path, sr: int, wav) -> Path:
-        import config
-
-        cap = config.YUE2_MAX_SECONDS * sr
-        if len(wav) > cap:
-            sf.write(str(out), wav[:cap], sr, subtype="PCM_16")
-        return out
+            return self._finish(out, cap_seconds=cap_seconds)
 
     # -- mlx (macOS; no LoRA — verified) ---------------------------------------
-    def _generate_mlx(self, style, lyrics, seed, cot) -> TTSResult:
+    def _generate_mlx(
+        self,
+        style,
+        lyrics,
+        seed,
+        cot,
+        cfg_scale,
+        steps,
+        max_seconds,
+        cap_seconds: int | None,
+    ) -> TTSResult:
         import config
 
         if platform.system() != "Darwin":
@@ -354,6 +392,13 @@ class YuE2Engine:
             ]
             if seed is not None:
                 cmd += ["--seed", str(seed)]
+            if cfg_scale is not None:
+                cmd += ["--cfg-scale", str(float(cfg_scale))]
+            if steps is not None:
+                cmd += ["--steps", str(int(steps))]
+            if max_seconds is not None:
+                # upstream generate.py decodes semantic tokens at 40 ms/frame
+                cmd += ["--max-semantic-tokens", str(int(max_seconds * 25))]
             # cwd=mlx_dir: generate.py resolves the relative "--model 8bit"
             # against the subprocess cwd, not its own script dir.
             proc = subprocess.run(
@@ -361,4 +406,4 @@ class YuE2Engine:
             )
             if proc.returncode != 0:
                 raise RuntimeError(f"MLX YuE2 failed: {proc.stderr[-2000:]}")
-            return self._read_result_wav(out)
+            return self._finish(out, cap_seconds=cap_seconds)
