@@ -474,3 +474,92 @@ def test_cap_lyrics_applied_for_mlx_when_max_seconds(fake_mlx, monkeypatch):
     assert seen == [60]
     eng.generate(style="s", lyrics="[intro 0:00-5:00]")
     assert seen == [60]  # blank max_seconds -> no cap on the mlx runtime
+
+
+# -- non-positive cap = no cap (v0.8.0 review fix) -----------------------------
+
+
+@pytest.mark.parametrize("cap_seconds", [0, -5])
+def test_nonpositive_cap_means_no_cap(tmp_path, cap_seconds):
+    """_finish must treat 0 / negative cap_seconds as NO cap: before the fix
+    `cap_seconds is not None` trimmed a longer-than-cap wav to zero samples,
+    so a cap of 0 completed "successfully" with silent empty audio."""
+    sr = 8000
+    path = tmp_path / "long.wav"
+    sf.write(
+        str(path), np.zeros(sr * 5, dtype=np.float32), sr, subtype="PCM_16"
+    )
+    eng = YuE2Engine()
+    wav, out_sr = eng._finish(path, cap_seconds=cap_seconds)
+    assert out_sr == sr
+    assert len(wav) == sr * 5  # full length kept — nothing trimmed
+
+
+def test_zero_max_seconds_means_no_cap(fake_mlx, monkeypatch):
+    """max_seconds=0 on the MLX path: no _cap_lyrics call and no trim to an
+    empty result (0 = 'no cap', never 'zero-length song')."""
+    eng, calls = fake_mlx
+    monkeypatch.setattr(eng, "_read_result_wav", lambda p: (np.zeros(48000), 48000))
+    seen = []
+    monkeypatch.setattr(
+        YuE2Engine,
+        "_cap_lyrics",
+        staticmethod(
+            lambda lyrics, *, cap_seconds: seen.append(cap_seconds) or lyrics
+        ),
+    )
+    wav, sr = eng.generate(style="s", lyrics="[intro 0:00-5:00]", max_seconds=0)
+    assert seen == []  # lyric gate skipped: no cap
+    assert len(wav) == 48000  # result untouched, not trimmed to empty
+
+
+def test_zero_config_cap_means_no_cap_for_pytorch(monkeypatch):
+    """RURU_YUE2_MAX_SECONDS=0 (a plausible operator misread of '0 = no cap')
+    must mean no cap for pytorch songs: no _cap_lyrics call and _finish gets
+    None, so the song is never trimmed to zero samples."""
+    import contextlib
+    import tempfile as _tempfile
+
+    monkeypatch.setattr("config.YUE2_RUNTIME", "pytorch")
+    monkeypatch.setattr("config.YUE2_MAX_SECONDS", 0)
+    monkeypatch.setattr(
+        YuE2Engine, "_pytorch_ready", staticmethod(lambda: (True, ""))
+    )
+    eng = YuE2Engine()
+    seen = []
+    monkeypatch.setattr(
+        YuE2Engine,
+        "_cap_lyrics",
+        staticmethod(
+            lambda lyrics, *, cap_seconds: seen.append(cap_seconds) or lyrics
+        ),
+    )
+
+    def fake_save(out_path):
+        import soundfile as _sf
+
+        # real FLAC content in the .flac path — the real _read_result_wav must
+        # read it back so _finish (the trim gate under test) runs for real
+        _sf.write(
+            str(out_path), np.zeros(48000, dtype="float32"), 48000, format="FLAC"
+        )
+
+    # real _generate_pytorch + real _finish: the trim gate is under test
+    monkeypatch.setattr(
+        eng,
+        "_load_pytorch_pipeline",
+        lambda with_lora: (
+            lambda **kw: type("S", (), {"save": staticmethod(fake_save)})()
+        ),
+    )
+    real_mkdtemp = _tempfile.mkdtemp
+
+    @contextlib.contextmanager
+    def fake_td(*a, **kw):
+        yield real_mkdtemp()
+
+    monkeypatch.setattr("engine.yue2_engine.tempfile.TemporaryDirectory", fake_td)
+
+    wav, sr = eng.generate(style="s", lyrics="[intro 0:00-5:00]")
+    assert seen == []  # lyric gate: cap 0 -> skipped (falsy, unchanged)
+    assert len(wav) == 48000  # full song — _finish did NOT trim to zero

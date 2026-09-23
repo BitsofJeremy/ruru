@@ -159,6 +159,9 @@ class YuE2Engine:
             if max_seconds is not None
             else (config.YUE2_MAX_SECONDS if runtime == "pytorch" else None)
         )
+        # Non-positive cap = no cap — 0 must never mean an empty song; covers
+        # max_seconds=0 and a non-positive RURU_YUE2_MAX_SECONDS.
+        cap = cap if (cap or 0) > 0 else None
         if cap:
             lyrics = self._cap_lyrics(lyrics, cap_seconds=cap)
         if runtime != "mlx" and (cfg_scale is not None or steps is not None):
@@ -296,7 +299,9 @@ class YuE2Engine:
         with WAV PCM data and re-read config instead of the effective cap).
         """
         wav, sr = self._read_result_wav(out_path)
-        if cap_seconds is not None and len(wav) > cap_seconds * sr:
+        # Non-positive cap = no cap (defense in depth: generate() already
+        # normalizes, but 0 must never trim a song to zero samples here).
+        if cap_seconds and cap_seconds > 0 and len(wav) > cap_seconds * sr:
             wav = wav[: cap_seconds * sr]
         return TTSResult(wav, int(sr))
 

@@ -7,7 +7,7 @@
 
 ---
 
-Audiobook narration engine powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) running **entirely on your own hardware**. Upload documents, pick a voice, and generate full audiobooks with local text-to-speech. v0.7.0 adds music generation — 48 kHz stereo songs via [YuE2-3B](https://huggingface.co/m-a-p/YuE2-3B) on the same hardware, with per-song control over seed, length, and export formats (WAV/MP3/M4A).
+Audiobook narration engine powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) running **entirely on your own hardware**. Upload documents, pick a voice, and generate full audiobooks with local text-to-speech. v0.7.0 adds music generation — 48 kHz stereo songs via [YuE2-3B](https://huggingface.co/m-a-p/YuE2-3B) on the same hardware; v0.8.0 adds per-song control over seed, length, and export formats (WAV/MP3/M4A).
 
 Two interchangeable GPU backends, selected with `RURU_TTS_BACKEND`:
 

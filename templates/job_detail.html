@@ -153,7 +153,10 @@
                     </div>
                 </div>
                 <audio controls class="w-full">
-                    <source src="/audio/output/{{ job.output_path | basename }}" type="audio/{{ job.audio_format or 'mp3' }}">
+                    {% set fmt = job.audio_format or 'mp3' %}
+                    {# audio/m4a is not a real MIME type — m4a is audio/mp4 #}
+                    {% set mime = {'mp3': 'audio/mpeg', 'm4a': 'audio/mp4', 'wav': 'audio/wav'}.get(fmt, 'audio/' + fmt) %}
+                    <source src="/audio/output/{{ job.output_path | basename }}" type="{{ mime }}">
                     Your browser does not support the audio element.
                 </audio>
             </div>
