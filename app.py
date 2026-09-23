@@ -1140,7 +1140,15 @@ async def job_detail(job_id: int):
         job = await session.get(Job, job_id)
     if not job:
         return HTMLResponse("Job not found", status_code=404)
-    return HTMLResponse(render("job_detail.html", job=job))
+    # Music jobs export every format beside job.output_path (the primary —
+    # mp3 > m4a > wav); offer the non-primary siblings as extra links.
+    extra_downloads = []
+    if job.scope == "music" and job.output_path:
+        primary = Path(job.output_path)
+        extra_downloads = [
+            f for f in _format_siblings(job) if Path(f["path"]) != primary
+        ]
+    return HTMLResponse(render("job_detail.html", job=job, extra_downloads=extra_downloads))
 
 @app.get("/api/jobs/{job_id}/progress")
 async def job_progress(job_id: int):

@@ -43,6 +43,17 @@ class TestBackendLabel:
             assert get_backend_label(value).strip()
 
 
+class TestTabTitle:
+    @pytest.mark.parametrize("path", ["/", "/music"])
+    def test_tab_title_shows_backend_and_version(self, client, seeded_db, path):
+        """Every page shares one tab title: ruru {MLX|CUDA} {version}."""
+        html = client.get(path).text
+        expected = (
+            f"<title>ruru {get_backend_label()} {config.APP_VERSION}</title>"
+        )
+        assert expected in html
+
+
 class TestSidebarRenders:
     def test_version_and_backend_appear_in_rendered_html(self, seeded_db, client):
         """End to end: the values actually reach the page."""
