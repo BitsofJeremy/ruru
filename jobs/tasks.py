@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from jobs.models import JobStatus
+from engine.export import encode_variants
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +265,7 @@ def run_regenerate_chapter(job_id: int, **payload) -> dict:
 
 
 def run_generate_music(job_id: int, **payload) -> dict:
-    """Handle YuE2 music generation job (v0.7.0)."""
+    """Handle YuE2 music generation job (v0.8.0 multi-format export)."""
     from models.db import get_sync_session, Job
     from engine.yue2_engine import YuE2Engine
 
@@ -281,16 +282,24 @@ def run_generate_music(job_id: int, **payload) -> dict:
             lyrics=payload.get("lyrics", ""),
             instrumental=bool(payload.get("instrumental", False)),
             seed=payload.get("seed"),
+            cot=payload.get("cot"),
+            cfg_scale=payload.get("cfg_scale"),
+            steps=payload.get("steps"),
+            max_seconds=payload.get("max_seconds"),
         )
         os.makedirs(output_dir, exist_ok=True)
-        output_path = f"{output_dir}/music_{job_id}.wav"
-        result.write(output_path)
+        formats = payload.get("formats") or ["wav"]
+        outputs = encode_variants(result, Path(output_dir) / f"music_{job_id}", formats)
+        primary = next(outputs[k] for k in ("mp3", "m4a", "wav") if k in outputs)
+        output_path = str(primary)
+        audio_format = primary.suffix.lstrip(".")
 
         with next(get_sync_session()) as session:
             job = session.get(Job, job_id)
             if job:
                 job.status = JobStatus.COMPLETED.value
                 job.output_path = output_path
+                job.audio_format = audio_format
                 session.commit()
         return {"status": "completed", "output_path": output_path}
     except Exception as e:

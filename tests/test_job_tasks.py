@@ -267,8 +267,11 @@ class TestRunRegenerateChapter:
 
 class TestRunGenerateMusic:
     @patch("engine.yue2_engine.YuE2Engine")
-    def test_music_completes_and_writes(self, mock_engine_cls, task_env):
+    def test_music_completes_and_writes_wav_only(self, mock_engine_cls, task_env):
+        """formats=["wav"] publishes exactly one real file — music_<id>.wav,
+        no .mp3 — and the Job records wav as its audio_format/output_path."""
         from jobs.tasks import run_generate_music
+        from models.db import get_sync_session, Job
 
         audio = fake_audio()
         engine = MagicMock()
@@ -281,6 +284,7 @@ class TestRunGenerateMusic:
             lyrics="[instrumental]",
             instrumental=True,
             seed=21,
+            formats=["wav"],
         )
 
         assert result["status"] == "completed"
@@ -288,8 +292,102 @@ class TestRunGenerateMusic:
         kwargs = engine.generate.call_args.kwargs
         assert kwargs["instrumental"] is True
         assert kwargs["seed"] == 21
-        audio.write.assert_called_once()
-        assert (task_env["output_dir"] / f"music_{task_env['job_id']}.wav").exists()
+
+        out = task_env["output_dir"]
+        stem = f"music_{task_env['job_id']}"
+        assert (out / f"{stem}.wav").exists()
+        assert not (out / f"{stem}.mp3").exists()
+
+        with next(get_sync_session()) as session:
+            job = session.get(Job, task_env["job_id"])
+            assert job.status == "completed"
+            assert job.audio_format == "wav"
+            assert job.output_path.endswith(".wav")
+
+    @patch("engine.yue2_engine.YuE2Engine")
+    def test_music_writes_all_checked_formats(self, mock_engine_cls, task_env):
+        """All three requested formats are handed to encode_variants, and the
+        primary file (mp3 wins over m4a/wav) becomes the job's output_path."""
+        from jobs.tasks import run_generate_music
+        from models.db import get_sync_session, Job
+
+        engine = MagicMock()
+        engine.generate.return_value = fake_audio()
+        mock_engine_cls.return_value = engine
+
+        stem = task_env["output_dir"] / f"music_{task_env['job_id']}"
+        stubs = {
+            "wav": stem.with_suffix(".wav"),
+            "mp3": stem.with_suffix(".mp3"),
+            "m4a": stem.with_suffix(".m4a"),
+        }
+
+        with patch("jobs.tasks.encode_variants", return_value=stubs) as mock_encode:
+            result = run_generate_music(
+                task_env["job_id"],
+                style="s", lyrics="l",
+                formats=["wav", "mp3", "m4a"],
+            )
+
+        assert result["status"] == "completed"
+        mock_encode.assert_called_once()
+        args = mock_encode.call_args.args
+        assert args[1] == stem
+        assert list(args[2]) == ["wav", "mp3", "m4a"]
+
+        with next(get_sync_session()) as session:
+            job = session.get(Job, task_env["job_id"])
+            assert job.output_path == str(stubs["mp3"])
+            assert job.audio_format == "mp3"
+        assert result["output_path"] == str(stubs["mp3"])
+
+    @patch("engine.yue2_engine.YuE2Engine")
+    def test_music_forwards_advanced_params(self, mock_engine_cls, task_env):
+        """cot/cfg_scale/steps/max_seconds from the payload reach
+        engine.generate as kwargs instead of being silently dropped."""
+        from jobs.tasks import run_generate_music
+
+        engine = MagicMock()
+        engine.generate.return_value = fake_audio()
+        mock_engine_cls.return_value = engine
+
+        result = run_generate_music(
+            task_env["job_id"],
+            style="s", lyrics="l",
+            cot="melody", cfg_scale=1.5, steps=16, max_seconds=240,
+        )
+
+        assert result["status"] == "completed"
+        kwargs = engine.generate.call_args.kwargs
+        assert kwargs["cot"] == "melody"
+        assert kwargs["cfg_scale"] == 1.5
+        assert kwargs["steps"] == 16
+        assert kwargs["max_seconds"] == 240
+
+    @patch("engine.yue2_engine.YuE2Engine")
+    def test_music_export_failure_marks_job_failed(self, mock_engine_cls, task_env):
+        """encode_variants' RuntimeError (missing ffmpeg) lands in
+        job.error_message via the handler's unchanged failure path."""
+        from jobs.tasks import run_generate_music
+        from models.db import get_sync_session, Job
+
+        engine = MagicMock()
+        engine.generate.return_value = fake_audio()
+        mock_engine_cls.return_value = engine
+
+        ffmpeg_error = RuntimeError(
+            "MP3/M4A export requires ffmpeg — install ffmpeg or export WAV only"
+        )
+        with patch("jobs.tasks.encode_variants", side_effect=ffmpeg_error):
+            with pytest.raises(RuntimeError, match="ffmpeg"):
+                run_generate_music(
+                    task_env["job_id"], style="s", lyrics="l", formats=["mp3"],
+                )
+
+        with next(get_sync_session()) as session:
+            job = session.get(Job, task_env["job_id"])
+            assert job.status == "failed"
+            assert "ffmpeg" in job.error_message
 
     @patch("engine.yue2_engine.YuE2Engine")
     def test_music_failure_marks_job_failed(self, mock_engine_cls, task_env):
