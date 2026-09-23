@@ -7,7 +7,7 @@
 
 ---
 
-Audiobook narration engine powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) running **entirely on your own hardware**. Upload documents, pick a voice, and generate full audiobooks with local text-to-speech. v0.7.0 adds music generation — 48 kHz stereo songs via [YuE2-3B](https://huggingface.co/m-a-p/YuE2-3B) on the same hardware.
+Audiobook narration engine powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) running **entirely on your own hardware**. Upload documents, pick a voice, and generate full audiobooks with local text-to-speech. v0.7.0 adds music generation — 48 kHz stereo songs via [YuE2-3B](https://huggingface.co/m-a-p/YuE2-3B) on the same hardware, with per-song control over seed, length, and export formats (WAV/MP3/M4A).
 
 Two interchangeable GPU backends, selected with `RURU_TTS_BACKEND`:
 
@@ -157,6 +157,10 @@ All settings are controlled via environment variables with the `RURU_` prefix.
 | `RURU_CHUNK_SIZE_WORDS` | `120` | Words per TTS chunk (lower = less memory per chunk) |
 | `RURU_CHUNK_MAX_CHARS` | `700` | Hard character ceiling per chunk |
 | `RURU_MAX_RETRIES` | `3` | Retries when a chunk comes back the wrong length |
+| `RURU_YUE2_RUNTIME` | `` (auto) | Music runtime: `gguf`, `pytorch`, `mlx`, or blank = auto (gguf on Linux, mlx on macOS) |
+| `RURU_YUE2_COT` | `full` | Chain-of-thought preset: `off`, `melody`, or `full` — also the default selected in the Music form's Advanced CoT dropdown |
+| `RURU_YUE2_MAX_SECONDS` | `90` | PyTorch-runtime song length cap in seconds (VRAM guard); overridable per job from the Music form's Length field (1–300 s) |
+| `RURU_YUE2_INST_LORA_SCALE` | `1.0` | Instrumental LoRA merge scale (pytorch runtime only) |
 
 ## Project structure
 
@@ -350,6 +354,35 @@ export RURU_YUE2_AUDIOCPP_BIN=/path/to/audiocpp/binary
 > the Music page shows the Instrumental checkbox as unavailable, and an
 > instrumental request fails with a "reinstall per README" error instead of a
 > bare `ModuleNotFoundError: No module named 'yue2'`.
+
+**The form:** a style prompt and lyrics/structure tags are required, plus an
+Instrumental checkbox (pytorch LoRA — disabled where unavailable). **Seed** —
+blank draws a random seed (`0..2147483647`), recorded on the job and shown
+with the result; a fixed seed reproduces the song **only within the MLX
+runtime**. **Length** — blank lets the lyric tags decide, otherwise 1–300 s
+(5 min). Per runtime: MLX
+enforces it via `--max-semantic-tokens` (25 frames per second), pytorch takes
+it as a per-job override of `RURU_YUE2_MAX_SECONDS` (90 s default — drop to
+60–90 s if a 12 GB card OOMs), and gguf is best-effort (compressed timed tags
++ final trim). When a cap is active, every runtime compresses timed
+`[tag m:ss-m:ss]` lyric lines that overrun it and trims the audio to it —
+the smaller of the Length field and the tags wins. **Export formats** —
+check any of WAV/MP3/M4A (WAV + MP3 checked by default). WAV never needs
+ffmpeg; MP3/M4A do, and a missing
+ffmpeg fails the job with "MP3/M4A export requires ffmpeg — install ffmpeg or
+export WAV only". Outputs land as `music_<id>.{wav,mp3,m4a}`; the job's
+player/download picks mp3 > m4a > wav. **Advanced** — chain-of-thought
+(`off`/`melody`/`full`, defaulting to `RURU_YUE2_COT`) applies on every
+runtime; CFG scale and Steps are MLX-only (other runtimes log and ignore
+them — the form labels them "(MLX runtime only)").
+
+**Flow:** Generate returns immediately; the song appears in-place and under
+Recent Songs when done. The in-place status polls `/api/music/status/{id}`
+every 3 s and swaps to a player (plus seed and per-format download links) on
+completion. **Recent Songs** lists the 12 newest completed songs — listen in
+place, download any exported format, or delete (with a confirm prompt;
+queued/running jobs can't be deleted). The form disables itself while any job
+is queued or running.
 
 Knobs: `RURU_YUE2_RUNTIME` (gguf/pytorch/mlx/"" = auto),
 `RURU_YUE2_MAX_SECONDS` (90; drop to 60 if the 12 GB card OOMs),

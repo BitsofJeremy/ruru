@@ -138,7 +138,7 @@ jobs/
   models.py              # JobStatus enum, TTSJob/NarrateJob dataclasses.
   queue.py               # JobRunner class (asyncio queue + background thread).
   tasks.py               # Sync job handlers: run_generate_tts, run_narrate_document,
-                        #   run_regenerate_chapter.
+                        #   run_regenerate_chapter, run_generate_music.
 models/
   db.py                 # SQLAlchemy models + set_db_path(), init_db(), get_sync_session().
   scan_voice_clones.py  # Imports voice_clones/*.{mp3,wav} + matching .txt into the library.
@@ -148,6 +148,9 @@ engine/
   result.py             # TTSResult — tuple-unpackable as (wav, sr), plus .wav/.sr/.write().
   mlx_engine.py         # MLXEngine — Apple Silicon, via mlx-audio.
   cuda_engine.py        # CUDAEngine — NVIDIA, via qwen-tts + torch.
+  yue2_engine.py        # YuE2Engine — music generation (gguf/pytorch/mlx runtimes).
+  yue2_lora.py          # Vendored instrumental-LoRA merge for YuE2.
+  export.py             # encode_variants() — multi-format (WAV/MP3/M4A) export.
   tts.py                # Back-compat shim: re-exports MLXEngine as TTSEngine.
   parsers.py            # parse_document() dispatcher. EPUB (ebooklib+BS4, zipfile fallback) and TXT.
   chunker.py            # split_into_chunks() — sentence-boundary-aware, default 120 words.
@@ -160,6 +163,8 @@ templates/              # Jinja2 templates.
   voice_add.html        # Voice creation (design + clone).
   voice_edit.html       # Voice edit form.
   narrate.html          # Document upload and narration.
+  music.html            # Music form (YuE2) + Recent Songs panel.
+  partials/music_clips.html # Recent Songs cards (fragment from GET /api/music/clips).
   job_detail.html       # Job progress with live polling.
   admin_storage.html    # Storage administration.
   error.html            # Styled 404/500 error page.
@@ -192,6 +197,10 @@ All env vars use the `RURU_` prefix. Defined in `config.py`. Data lives under `W
 | `RURU_CREATOR_TAG` | `Created by ruru` | Audio metadata tag |
 | `RURU_AUDIO_FORMAT` | `mp3` | Output format |
 | `RURU_AUDIO_BITRATE` | `128k` | Output bitrate |
+| `RURU_YUE2_RUNTIME` | `` (auto) | Music runtime: `gguf`, `pytorch`, `mlx`, or blank = auto (gguf on Linux, mlx on macOS) |
+| `RURU_YUE2_COT` | `full` | Chain-of-thought preset (`off`/`melody`/`full`) — also the Music form's Advanced CoT default |
+| `RURU_YUE2_MAX_SECONDS` | `90` | PyTorch-runtime song length cap (VRAM guard); per-job overridable from the Music form's Length field (1–300 s) |
+| `RURU_YUE2_INST_LORA_SCALE` | `1.0` | Instrumental LoRA merge scale (pytorch runtime only) |
 
 Note: there is no Redis/Celery anywhere — the job runner is fully in-process (`jobs/queue.py`).
 
@@ -241,6 +250,7 @@ See `docs/uninstall.md` for step-by-step teardown instructions.
 
 - Dark mode with custom Tailwind colors: `kj-bg`, `kj-card`, `kj-border`, `kj-accent` (purple), `kj-accent2` (teal), `kj-text`, `kj-muted`
 - HTMX for all interactivity — no custom JavaScript
+- History panels (Recent Clips, Recent Songs) load via `hx-trigger="load, refreshHistory from:body"`; inline deletes return an empty `200` plus an `HX-Trigger` header; long jobs poll a status endpoint (`/api/jobs/{id}/progress`, `/api/music/status/{id}`) until `job:complete`
 - Status badges: running = teal pulse-dot, completed = green, failed = red, queued = yellow
 - Voice type badges: cloned = blue, designed = green
 
@@ -250,7 +260,7 @@ Voices come from `voice_clones/` — an audio file plus a same-stem `.txt` trans
 
 ## Testing
 
-Pytest suite lives in `tests/` (unit tests for chunker, assembler, parsers, config, db, job models/queue/tasks, and route tests for tts/voices/narrate/jobs). Run with `uv run pytest`. `pytest-asyncio` and `pytest-mock` are dev dependencies; model loading is mocked (`tests/conftest.py` provides `MOCK_WAV`, `fake_audio()`, and the `mock_tts_engine` fixture that patches the backend factory) so tests never touch the GPU.
+Pytest suite lives in `tests/` (unit tests for chunker, assembler, parsers, config, db, export, job models/queue/tasks, the YuE2 engine, and route tests for tts/voices/narrate/jobs/music). Run with `uv run pytest`. `pytest-asyncio` and `pytest-mock` are dev dependencies; model loading is mocked (`tests/conftest.py` provides `MOCK_WAV`, `fake_audio()`, and the `mock_tts_engine` fixture that patches the backend factory) so tests never touch the GPU.
 
 The whole suite must pass on **both** platforms. Two files carry that guarantee:
 - `tests/test_engine_contract.py` — checks every backend class against the ABC: signatures, `is_loaded` really being a property, synchronous methods, and that both generators return something tuple-unpackable *and* `.write()`-able. Tests needing a live runtime skip themselves.

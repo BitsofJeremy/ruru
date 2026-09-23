@@ -74,8 +74,11 @@ YUE2_INST_LORA_REPO = _env(
     "YUE2_INST_LORA_REPO", "Mothersuperior/YuE2-instrumental-cot-full-loras"
 )
 YUE2_INST_LORA_SCALE = float(_env("YUE2_INST_LORA_SCALE", "1.0"))
+# Chain-of-thought preset — engine fallback and the form default for the
+# Music page's Advanced CoT select (blank field → this value).
 YUE2_COT = _env("YUE2_COT", "full")
 # PyTorch-runtime song length cap (seconds) — keeps peak VRAM inside 12 GB.
+# Per-job overridable from the Music form's Length field (blank = this cap).
 YUE2_MAX_SECONDS = int(_env("YUE2_MAX_SECONDS", "90"))
 
 
