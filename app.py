@@ -1,8 +1,10 @@
 """ruru — Audiobook narration engine powered by Qwen3-TTS."""
 from __future__ import annotations
 
+import html
 import logging
 import os
+import random
 import re
 import shutil
 import sqlite3
@@ -27,6 +29,7 @@ _REPO_ROOT = Path(__file__).parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+import config
 from config import (
     WORK_DIR,
     DB_PATH,
@@ -700,7 +703,67 @@ async def api_tts_clips():
     return HTMLResponse(render("partials/tts_clips.html", clips=clips))
 
 # =============================================================================
-# Routes: Music (YuE2-3B) — added v0.7.0
+# Shared job helpers — format-sibling probing + delete sweep (v0.8.0)
+
+def _format_siblings(job) -> list[dict]:
+    """Existing export variants (wav/mp3/m4a) beside ``job.output_path``.
+
+    Returns one ``{"ext", "name", "path"}`` dict per file that actually
+    exists (pre-upgrade rows are wav-only — missing siblings are skipped).
+    Paths derive from ``job.output_path`` itself, never the global
+    OUTPUT_DIR, so RURU_WORK_DIR overrides and tests resolve correctly.
+    """
+    if not job.output_path:
+        return []
+    out = Path(job.output_path)
+    files = []
+    for ext in ("wav", "mp3", "m4a"):
+        path = out.parent / f"{out.stem}.{ext}"
+        if path.is_file():
+            files.append({"ext": ext, "name": path.name, "path": path})
+    return files
+
+
+async def _delete_job_and_files(session, job) -> None:
+    """Delete a job's on-disk artifacts and its DB rows (commits).
+
+    Shared by DELETE /api/jobs/{id} and DELETE /api/music/clips/{id}:
+    unlinks the primary output plus every format sibling, removes the
+    per-chunk WAV dir and the (guarded) uploaded source document, then
+    deletes the chapters and the Job row.
+    """
+    from models.db import Chapter
+
+    siblings = _format_siblings(job)
+    if job.output_path:
+        Path(job.output_path).unlink(missing_ok=True)
+    for sibling in siblings:
+        Path(sibling["path"]).unlink(missing_ok=True)
+    # Per-chunk WAVs: narrate jobs write chunks/job_<id>/chunk_*.wav.
+    # Never raises — a missing dir is the common case (short TTS jobs
+    # don't chunk).
+    chunk_dir = CHUNK_DIR / f"job_{job.id}"
+    if chunk_dir.is_dir():
+        shutil.rmtree(chunk_dir, ignore_errors=True)
+    # Uploaded source document. CAREFUL: for /api/tts/generate jobs,
+    # source_path is the raw TEXT, not a filesystem path — resolve()
+    # against the upload dir and is_file() both guard that (raw text
+    # won't resolve under UPLOAD_DIR).
+    src = Path(job.source_path)
+    if src.is_absolute():
+        upload_file = src.resolve() if src.is_file() else None
+    else:
+        upload_file = None
+    if upload_file is not None and upload_file.is_relative_to(UPLOAD_DIR.resolve()):
+        upload_file.unlink(missing_ok=True)
+
+    await session.execute(sqlalchemy.delete(Chapter).where(Chapter.job_id == job.id))
+    await session.delete(job)
+    await session.commit()
+
+
+# =============================================================================
+# Routes: Music (YuE2-3B) — v0.8.0
 
 @app.get("/music", response_class=HTMLResponse)
 async def music_page():
@@ -714,6 +777,7 @@ async def music_page():
         "music.html",
         active_jobs_count=active_jobs_count,
         instrumental_available=YuE2Engine._pytorch_ready()[0],
+        default_cot=config.YUE2_COT,
     ))
 
 @app.post("/api/music", response_class=HTMLResponse)
@@ -722,12 +786,92 @@ async def api_music(request: Request):
     style = form.get("style", "").strip()
     lyrics = form.get("lyrics", "").strip()
     instrumental = form.get("instrumental") == "on"
-    seed_raw = (form.get("seed") or "").strip()
-    audio_format = form.get("audio_format", "wav")
 
     if not style or not lyrics:
         return HTMLResponse("<p class='text-red-500'>Style and lyrics required.</p>", status_code=400)
-    seed = int(seed_raw) if seed_raw else None
+
+    # Seed: blank -> fresh random; anything else must fit in a signed
+    # 32-bit column (garbage used to 500 via a bare int()).
+    seed_raw = (form.get("seed") or "").strip()
+    if not seed_raw:
+        seed = random.randrange(0, 2**31)
+    else:
+        try:
+            seed = int(seed_raw)
+        except ValueError:
+            seed = -1
+        if not 0 <= seed <= 2**31 - 1:
+            return HTMLResponse(
+                "<p class='text-red-500'>Seed must be an integer between 0 and 2147483647.</p>",
+                status_code=400,
+            )
+
+    # Export formats: keep only known ones. An empty result (nothing
+    # checked, or only garbage values) must fail HERE — otherwise the job
+    # reaches encode_variants and dies with an empty error message.
+    from engine.export import ALLOWED_FORMATS
+    formats = [f for f in form.getlist("formats") if f in ALLOWED_FORMATS]
+    if not formats:
+        return HTMLResponse(
+            "<p class='text-red-500'>Pick at least one export format.</p>",
+            status_code=400,
+        )
+
+    # Length cap: blank -> engine/config default; otherwise 1..300 s.
+    # Non-positive values must never reach the engine — max_seconds=0
+    # would silently produce an empty song.
+    max_seconds_raw = (form.get("max_seconds") or "").strip()
+    if not max_seconds_raw:
+        max_seconds = None
+    else:
+        try:
+            max_seconds = int(max_seconds_raw)
+        except ValueError:
+            max_seconds = 0
+        if not 1 <= max_seconds <= 300:
+            return HTMLResponse(
+                "<p class='text-red-500'>Max seconds must be an integer between 1 and 300.</p>",
+                status_code=400,
+            )
+
+    # Chain-of-thought: blank -> None (the engine falls back to
+    # config.YUE2_COT); otherwise one of the three preset values.
+    cot = (form.get("cot") or "").strip().lower() or None
+    if cot is not None and cot not in ("off", "melody", "full"):
+        return HTMLResponse(
+            "<p class='text-red-500'>Chain-of-thought must be off, melody, or full.</p>",
+            status_code=400,
+        )
+
+    cfg_scale_raw = (form.get("cfg_scale") or "").strip()
+    if cfg_scale_raw:
+        try:
+            cfg_scale = float(cfg_scale_raw)
+        except ValueError:
+            return HTMLResponse(
+                "<p class='text-red-500'>CFG scale must be a number.</p>",
+                status_code=400,
+            )
+    else:
+        cfg_scale = None
+
+    steps_raw = (form.get("steps") or "").strip()
+    if steps_raw:
+        try:
+            steps = int(steps_raw)
+        except ValueError:
+            steps = 0
+        if steps < 1:
+            return HTMLResponse(
+                "<p class='text-red-500'>Steps must be a positive integer.</p>",
+                status_code=400,
+            )
+    else:
+        steps = None
+
+    # Primary format for the Job row follows the handler's mp3 > m4a > wav
+    # order (the handler overwrites it from the actual files anyway).
+    primary_format = next(f for f in ("mp3", "m4a", "wav") if f in formats)
 
     async with get_async_session() as session:
         from models.db import Job
@@ -737,7 +881,8 @@ async def api_music(request: Request):
             status="queued",
             source_path=f"{style}\n---\n{lyrics}",
             scope="music",
-            audio_format=audio_format,
+            audio_format=primary_format,
+            seed=seed,
         )
         session.add(new_job)
         await session.commit()
@@ -748,28 +893,140 @@ async def api_music(request: Request):
         "lyrics": lyrics,
         "instrumental": instrumental,
         "seed": seed,
-        "audio_format": audio_format,
+        "cot": cot,
+        "cfg_scale": cfg_scale,
+        "steps": steps,
+        "max_seconds": max_seconds,
+        "formats": formats,
     }
     runner = get_runner()
-    future = await runner.enqueue(job_id, JobType.GENERATE_MUSIC, payload)
-    try:
-        result = await future
-    except Exception as e:
-        # Job exceptions land on the future (queue.py) — surface the message
-        # as the same failure fragment instead of a blank generic 500 page.
-        result = {"status": "failed", "message": str(e)}
-
-    if result.get("status") == "completed":
-        audio_name = Path(result["output_path"]).name
-        return HTMLResponse(
-            f'<div hx-swap="innerHTML"><audio controls src="/audio/output/{audio_name}" '
-            f'class="w-full mt-2"></audio></div>',
-            headers={"HX-Trigger": "refreshHistory"},
-        )
-    return HTMLResponse(
-        f"<p class='text-red-500'>Job failed: {result.get('message', 'unknown')}</p>",
-        status_code=500,
+    # Do NOT await the future inline — song generation takes minutes and
+    # would block the HTTP request (mirrors api_narrate). The job runs in
+    # the background; the returned fragment polls /api/music/status/{id}.
+    await runner.enqueue(job_id, JobType.GENERATE_MUSIC, payload)
+    status_url = f"/api/music/status/{job_id}"
+    body = (
+        f'<div id="music-status" hx-get="{status_url}" '
+        f'hx-trigger="load, every 3s until job:complete" hx-swap="innerHTML">'
+        f'<div class="flex items-center gap-2 text-kj-muted text-sm mb-2">'
+        f'<div class="animate-spin h-4 w-4 border-2 border-kj-accent2 border-t-transparent rounded-full"></div>'
+        f"<span>queued…</span>"
+        f"</div>"
+        f'<a href="/jobs/{job_id}" class="text-kj-accent text-sm hover:underline">view job →</a>'
+        f"</div>"
     )
+    return HTMLResponse(body)
+
+
+@app.get("/api/music/status/{job_id}", response_class=HTMLResponse)
+async def api_music_status(job_id: int):
+    """Polling fragment for #music-status on /music. Emits HX-Trigger when
+    terminal so the page stops polling; completed also fires
+    refreshHistory to reload the Recent Songs panel."""
+    async with get_async_session() as session:
+        from models.db import Job
+        job = await session.get(Job, job_id)
+    if not job:
+        return HTMLResponse("Job not found", status_code=404)
+
+    spin = (
+        '<div class="animate-spin h-4 w-4 border-2 border-kj-accent2 border-t-transparent rounded-full"></div>'
+    )
+    view_link = (
+        f'<a href="/jobs/{job.id}" class="text-kj-accent text-sm hover:underline">view job →</a>'
+    )
+
+    if job.status in ("queued", "running"):
+        body = (
+            f'<div class="flex items-center gap-2 text-kj-muted text-sm mb-2">{spin}'
+            f"<span>Progress: {job.progress}%</span>"
+            f"</div>"
+            f"{view_link}"
+        )
+        return HTMLResponse(body)
+
+    if job.status == "completed":
+        parts = [
+            f'<p class="text-sm font-medium">\U0001f3b5 Done — {html.escape(job.title or "")}</p>'
+        ]
+        if job.output_path:
+            primary = Path(job.output_path).name
+            parts.append(
+                f'<audio controls src="/audio/output/{primary}" class="w-full"></audio>'
+            )
+        seed_label = job.seed if job.seed is not None else "—"
+        parts.append(f'<p class="text-xs text-kj-muted">Seed: {seed_label}</p>')
+        links = "".join(
+            f'<a href="/audio/output/{f["name"]}" class="text-kj-accent hover:underline" '
+            f'download>{f["ext"].upper()}</a>'
+            for f in _format_siblings(job)
+        )
+        if links:
+            parts.append(f'<div class="flex gap-3 text-xs">{links}</div>')
+        body = f'<div class="space-y-2">{"".join(parts)}</div>'
+        return HTMLResponse(
+            body,
+            headers={"HX-Trigger": '{"job:complete": true, "refreshHistory": true}'},
+        )
+
+    message = html.escape(job.error_message or "unknown error")
+    body = (
+        '<div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3">'
+        f'<p class="text-sm text-red-500">Failed: {message}</p>'
+        "</div>"
+    )
+    return HTMLResponse(body, headers={"HX-Trigger": "job:complete"})
+
+
+@app.get("/api/music/clips", response_class=HTMLResponse)
+async def api_music_clips():
+    """Recent songs for the /music page history panel."""
+    async with get_async_session() as session:
+        from models.db import Job
+        rows = (
+            await session.execute(
+                sqlalchemy.select(Job)
+                .where(Job.scope == "music", Job.status == "completed")
+                .order_by(Job.created_at.desc())
+                .limit(12)
+            )
+        ).scalars().all()
+
+    songs = []
+    for job in rows:
+        if not job.output_path:
+            continue
+        files = _format_siblings(job)
+        by_ext = {f["ext"]: f["name"] for f in files}
+        songs.append({
+            "id": job.id,
+            "title": job.title,
+            "seed": job.seed,
+            "created_at": job.created_at,
+            "files": files,
+            # Compact-first player: mp3, else m4a, else wav (old rows are
+            # wav-only; missing siblings mean no player at all).
+            "player_name": by_ext.get("mp3") or by_ext.get("m4a") or by_ext.get("wav"),
+        })
+    return HTMLResponse(render("partials/music_clips.html", songs=songs))
+
+
+@app.delete("/api/music/clips/{job_id}", response_class=HTMLResponse)
+async def api_music_clip_delete(job_id: int):
+    """Delete a song card in place: removes the row plus every format
+    sibling; empty 200 + refreshHistory lets HTMX drop the card."""
+    async with get_async_session() as session:
+        from models.db import Job
+        job = await session.get(Job, job_id)
+        if not job or job.scope != "music":
+            return HTMLResponse("Song not found", status_code=404)
+        if job.status in ("queued", "running"):
+            return HTMLResponse(
+                "<p class='text-red-500 text-sm'>Cannot delete a queued or running job.</p>",
+                status_code=400,
+            )
+        await _delete_job_and_files(session, job)
+    return HTMLResponse("", headers={"HX-Trigger": "refreshHistory"})
 
 # =============================================================================
 # Routes: Narration
@@ -912,9 +1169,9 @@ async def job_download(job_id: int):
 
 @app.delete("/api/jobs/{job_id}")
 async def job_delete(job_id: int):
-    """Delete a job and its output file. Never touches queued/running jobs."""
+    """Delete a job and its output files. Never touches queued/running jobs."""
     async with get_async_session() as session:
-        from models.db import Job, Chapter
+        from models.db import Job
         job = await session.get(Job, job_id)
         if not job:
             return HTMLResponse("Job not found", status_code=404)
@@ -923,31 +1180,9 @@ async def job_delete(job_id: int):
                 "<p class='text-red-500 text-sm'>Cannot delete a queued or running job.</p>",
                 status_code=400,
             )
-        # --- on-disk artifacts (run BEFORE the row goes, while we still
-        # --- have job.output_path / job.source_path in hand) ---
-        if job.output_path:
-            Path(job.output_path).unlink(missing_ok=True)
-        # Per-chunk WAVs: narrate jobs write chunks/job_<id>/chunk_*.wav.
-        # Never raises — a missing dir is the common case (short TTS jobs
-        # don't chunk).
-        chunk_dir = CHUNK_DIR / f"job_{job_id}"
-        if chunk_dir.is_dir():
-            shutil.rmtree(chunk_dir, ignore_errors=True)
-        # Uploaded source document. CAREFUL: for /api/tts/generate jobs,
-        # source_path is the raw TEXT, not a filesystem path — resolve()
-        # against the upload dir and is_file() both guard that (raw text
-        # won't resolve under UPLOAD_DIR).
-        src = Path(job.source_path)
-        if src.is_absolute():
-            upload_file = src.resolve() if src.is_file() else None
-        else:
-            upload_file = None
-        if upload_file is not None and upload_file.is_relative_to(UPLOAD_DIR.resolve()):
-            upload_file.unlink(missing_ok=True)
-
-        await session.execute(sqlalchemy.delete(Chapter).where(Chapter.job_id == job_id))
-        await session.delete(job)
-        await session.commit()
+        # on-disk artifacts + row removal, shared with the music clip delete
+        # (so dashboard deletes also sweep every format sibling).
+        await _delete_job_and_files(session, job)
     return HTMLResponse("", headers={"HX-Redirect": "/"})
 
 

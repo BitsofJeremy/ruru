@@ -59,7 +59,66 @@
                     <label for="seed" class="block text-sm font-medium text-kj-muted mb-2">Seed (optional)</label>
                     <input type="number" name="seed" id="seed"
                            class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                    <p class="text-xs text-kj-muted mt-1">Leave blank for a random seed. The seed used is shown with each result. Reproducible only within the MLX runtime (macOS).</p>
                 </div>
+
+                <!-- Length -->
+                <div>
+                    <label for="max_seconds" class="block text-sm font-medium text-kj-muted mb-2">Length in seconds (optional)</label>
+                    <input type="number" name="max_seconds" id="max_seconds" min="1" max="300"
+                           class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                    <p class="text-xs text-kj-muted mt-1">Blank = let the lyric tags decide. Max 300 s (5 min). PyTorch runtime still defaults to 90 s cap (RURU_YUE2_MAX_SECONDS) for VRAM.</p>
+                </div>
+
+                <!-- Export formats -->
+                <fieldset>
+                    <legend class="block text-sm font-medium text-kj-muted mb-2">Export formats</legend>
+                    <div class="flex items-center gap-4">
+                        <label class="flex items-center gap-2 text-sm text-kj-muted">
+                            <input type="checkbox" name="formats" value="wav" checked
+                                   class="h-4 w-4 rounded border-kj-border bg-kj-bg text-kj-accent">
+                            WAV
+                        </label>
+                        <label class="flex items-center gap-2 text-sm text-kj-muted">
+                            <input type="checkbox" name="formats" value="mp3" checked
+                                   class="h-4 w-4 rounded border-kj-border bg-kj-bg text-kj-accent">
+                            MP3
+                        </label>
+                        <label class="flex items-center gap-2 text-sm text-kj-muted">
+                            <input type="checkbox" name="formats" value="m4a"
+                                   class="h-4 w-4 rounded border-kj-border bg-kj-bg text-kj-accent">
+                            M4A
+                        </label>
+                    </div>
+                    <p class="text-xs text-kj-muted mt-1">MP3/M4A need ffmpeg.</p>
+                </fieldset>
+
+                <!-- Advanced -->
+                <details class="border border-kj-border rounded-lg p-4">
+                    <summary class="text-sm font-medium text-kj-muted cursor-pointer">Advanced</summary>
+                    <div class="space-y-4 mt-4">
+                        <div>
+                            <label for="cot" class="block text-sm font-medium text-kj-muted mb-2">Chain-of-thought (cot)</label>
+                            <select name="cot" id="cot"
+                                    class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                                <option value="off"{% if default_cot == "off" %} selected{% endif %}>off</option>
+                                <option value="melody"{% if default_cot == "melody" %} selected{% endif %}>melody</option>
+                                <option value="full"{% if default_cot == "full" %} selected{% endif %}>full</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="cfg_scale" class="block text-sm font-medium text-kj-muted mb-2">CFG scale (MLX runtime only)</label>
+                            <input type="number" name="cfg_scale" id="cfg_scale" step="any"
+                                   class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                        </div>
+                        <div>
+                            <label for="steps" class="block text-sm font-medium text-kj-muted mb-2">Steps</label>
+                            <input type="number" name="steps" id="steps"
+                                   class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                            <p class="text-xs text-kj-muted mt-1">NAR midpoint steps, default 32 (MLX runtime only)</p>
+                        </div>
+                    </div>
+                </details>
 
                 <!-- Submit -->
                 <div class="flex items-center gap-4">
@@ -69,7 +128,7 @@
                     </button>
                     <div id="music-spinner" class="htmx-indicator flex items-center gap-2 text-kj-muted text-sm">
                         <div class="animate-spin h-4 w-4 border-2 border-kj-accent2 border-t-transparent rounded-full"></div>
-                        <span>Generating music... this can take several minutes</span>
+                        <span>queued…</span>
                     </div>
                 </div>
             </div>
@@ -79,5 +138,16 @@
 
     <!-- Result area -->
     <div id="music-result" class="max-w-2xl"></div>
+
+    <!-- Song history -->
+    <div class="max-w-2xl">
+        <h2 class="text-xl font-semibold mb-3">Recent Songs</h2>
+        <div id="music-history"
+             hx-get="/api/music/clips"
+             hx-trigger="load, refreshHistory from:body"
+             hx-swap="innerHTML">
+            <p class="text-kj-muted text-sm">Loading...</p>
+        </div>
+    </div>
 </div>
 {% endblock %}

@@ -1,0 +1,31 @@
+{% if songs %}
+<div class="space-y-3">
+  {% for song in songs %}
+  <div class="music-clip-card bg-kj-card border border-kj-border rounded-lg p-4">
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <p class="text-sm text-kj-text truncate">{{ song.title }}</p>
+      {% if song.seed is not none %}
+      <span class="text-xs text-kj-accent shrink-0">seed {{ song.seed }}</span>
+      {% endif %}
+    </div>
+    {% if song.player_name %}
+    <audio controls src="/audio/output/{{ song.player_name }}" class="w-full"></audio>
+    {% endif %}
+    {% if song.files %}
+    <div class="flex gap-3 mt-2 text-xs">
+      {% for f in song.files %}
+      <a href="/audio/output/{{ f.name }}" class="text-kj-accent hover:underline" download>{{ f.ext|upper }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="flex items-center justify-between mt-2">
+      <p class="text-xs text-kj-muted">{{ song.created_at }}</p>
+      <button hx-delete="/api/music/clips/{{ song.id }}" hx-target="closest .music-clip-card"
+              hx-swap="outerHTML" hx-confirm="Delete this song and its files?">Delete</button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-kj-muted text-sm">No songs generated yet.</p>
+{% endif %}
