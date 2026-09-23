@@ -68,13 +68,14 @@ class Job(Base):
     audio_format: Mapped[str] = mapped_column(String, nullable=False, default="mp3")
     total_chunks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completed_chunks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    scope: Mapped[str] = mapped_column(String, nullable=False, default="document")  # 'document', 'chapter'
+    scope: Mapped[str] = mapped_column(String, nullable=False, default="document")  # 'document', 'chapter', 'quick', 'music'
     scope_index: Mapped[int | None] = mapped_column(Integer)
     error_message: Mapped[str | None] = mapped_column(Text)
     celery_task_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
     needs_rebuild: Mapped[bool] = mapped_column(Boolean, default=False)
+    seed: Mapped[int | None] = mapped_column(Integer)
     author: Mapped[str] = mapped_column(String, nullable=False, default="")
     cover_path: Mapped[str] = mapped_column(String, nullable=False, default="")
     progress: Mapped[int] = mapped_column(Integer, default=0)
@@ -154,6 +155,7 @@ async def init_db(db_path: str | Path) -> None:
             "ALTER TABLE jobs ADD COLUMN cover_path TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE voices ADD COLUMN image_path TEXT",
             "ALTER TABLE jobs ADD COLUMN progress INTEGER DEFAULT 0",
+            "ALTER TABLE jobs ADD COLUMN seed INTEGER",
         ]
         for sql in migrations:
             try:

@@ -78,6 +78,45 @@ class TestOrmModels:
         }.issubset(cols)
 
     @pytest.mark.asyncio
+    async def test_jobs_seed_column(self, tmp_db):
+        """Job.seed round-trips via ORM, defaults to None, and the migration
+        adds the column to a pre-existing DB that lacks it."""
+        import sqlite3
+
+        from models.db import init_db, Job, get_sync_session
+
+        # Migration path: legacy jobs table created without a seed column.
+        legacy_db = tmp_db.parent / "legacy_seed.db"
+        conn = sqlite3.connect(legacy_db)
+        conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")
+        conn.commit()
+        conn.close()
+
+        await init_db(legacy_db)
+        conn = sqlite3.connect(legacy_db)
+        try:
+            cur = conn.execute("SELECT seed FROM jobs")
+            cur.fetchall()
+        finally:
+            conn.close()
+
+        # ORM path: explicit seed round-trips, blank seed defaults to None.
+        await init_db(tmp_db)
+        with next(get_sync_session()) as session:
+            job = Job(title="Seeded", status="queued", source_path="/x", seed=21)
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+            assert job.seed == 21
+
+        with next(get_sync_session()) as session:
+            job = Job(title="Blank", status="queued", source_path="/x")
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+            assert job.seed is None
+
+    @pytest.mark.asyncio
     async def test_job_orm_defaults_apply(self, tmp_db):
         """Inserting a Job via ORM populates Python-side defaults so NOT NULL
         columns are satisfied — the exact bug the raw-SQL seed fixture hit."""
