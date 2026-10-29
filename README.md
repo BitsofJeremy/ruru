@@ -30,6 +30,7 @@ The name is a nod to ruru, the morepork owl — known for its distinctive two-no
 
 - **Document narration** — Upload EPUB or TXT files, split into chapters and chunks, narrate with a single voice
 - **Quick TTS** — Type text, pick a voice, get audio instantly; a Recent Clips history panel keeps your last 10 generated clips on the page
+- **Live TTS (Phonon, optional)** — Instant playback with 102 built-in Gradium voices from the Quick TTS page; CPU-only, nothing saved
 - **Voice library** — Browse, audition, and manage voices
 - **Voice creation** — Clone a voice from a reference audio clip, or design one from a text description
 - **Voice preview** — Generate an on-demand sample for any designed voice, narrated from a random line
@@ -161,6 +162,12 @@ All settings are controlled via environment variables with the `RURU_` prefix.
 | `RURU_YUE2_COT` | `full` | Chain-of-thought preset: `off`, `melody`, or `full` — also the default selected in the Music form's Advanced CoT dropdown |
 | `RURU_YUE2_MAX_SECONDS` | `90` | PyTorch-runtime song length cap in seconds (VRAM guard); overridable per job from the Music form's Length field (1–300 s) |
 | `RURU_YUE2_INST_LORA_SCALE` | `1.0` | Instrumental LoRA merge scale (pytorch runtime only) |
+| `RURU_PHONON` | `auto` | Live TTS switch: `1` = on, `0` = off, `auto` = on iff the `phonon` extra is installed |
+| `RURU_PHONON_MODEL` | `hf://gradium/phonon-31m-en` | Live TTS model repo (Apache-2.0 31m only; 40m repos are rejected) |
+| `RURU_PHONON_QUANT` | `q8` | Live TTS weight format |
+| `RURU_PHONON_LANG` | `en` | Text-normalization language (`en`, `fr`, `de`, `es`, `pt`, `none`) |
+| `RURU_PHONON_THREADS` | `4` | CPU thread cap for live TTS tensor ops |
+| `RURU_PHONON_MAX_CHARS` | `2000` | Hard character cap on live TTS requests |
 
 ## Project structure
 
@@ -389,6 +396,36 @@ Knobs: `RURU_YUE2_RUNTIME` (gguf/pytorch/mlx/"" = auto),
 `RURU_YUE2_INST_LORA_SCALE` (1.0), `RURU_YUE2_COT` (full).
 Model + LoRA are CC BY-NC 4.0 (non-commercial). Music on Apple Silicon has no
 LoRA and no realistic path to one until the MLX port grows adapter support.
+
+## Live TTS (Phonon) — optional
+
+A second TTS engine for the Quick TTS page: [Phonon 31m](https://huggingface.co/gradium/phonon-31m-en)
+(Apache-2.0), a small CPU-only model that generates roughly 6× realtime with
+**102 built-in Gradium voices**. Unlike Qwen TTS it needs no voice library, no
+GPU, and no job: pick a canned voice from the dropdown, hit **Generate &
+play**, and the clip plays right in the page. **Nothing is saved** — no voice
+library entry, no job/history row, no file on disk. Live TTS is playback only.
+
+Install it as an optional extra (torch-free, ~7 MB wheel; the ~99 MB model
+downloads to the standard HF cache on first use):
+
+```bash
+uv sync --extra cuda --extra phonon   # or --extra mlx --extra phonon
+```
+
+The Quick TTS page then shows an engine toggle — **Qwen (clone/design)** and
+**Phonon live (canned voices)**. Without the extra, or with `RURU_PHONON=0`,
+the toggle never renders and ruru behaves exactly as before. JSON API:
+
+| Endpoint | Behavior |
+|---|---|
+| `GET /api/tts/live/voices` | `{"available": bool, "voices": [{name, voice_id, language, description}, ...]}` |
+| `POST /api/tts/live` | Body `{"text", "voice", "format": "wav"}` → binary 24 kHz mono WAV. Errors: 400 empty text/bad format, 413 over `RURU_PHONON_MAX_CHARS`, 404 unknown voice, 503 when disabled |
+
+Knobs: `RURU_PHONON` (`1`/`0`/`auto`), `RURU_PHONON_MODEL` (31m only — 40m
+weights are CC BY-NC and rejected in code), `RURU_PHONON_QUANT` (q8),
+`RURU_PHONON_LANG` (global; per-request language is a planned extension),
+`RURU_PHONON_THREADS` (4), `RURU_PHONON_MAX_CHARS` (2000).
 
 ## License
 
