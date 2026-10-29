@@ -150,6 +150,11 @@ engine/
   cuda_engine.py        # CUDAEngine — NVIDIA, via qwen-tts + torch.
   yue2_engine.py        # YuE2Engine — music generation (gguf/pytorch/mlx runtimes).
   yue2_lora.py          # Vendored instrumental-LoRA merge for YuE2.
+  phonon_engine.py      # Phonon live TTS — optional, CPU-only, playback-only
+                        #   (the `phonon` extra). NOT a TTSEngineBase subclass:
+                        #   no Job row, no Voice row, no OUTPUT_DIR writes. All
+                        #   ptts imports go through _import_ptts(); absent wheel
+                        #   = feature off. phonon-40m repos rejected in code.
   export.py             # encode_variants() — multi-format (WAV/MP3/M4A) export.
   tts.py                # Back-compat shim: re-exports MLXEngine as TTSEngine.
   parsers.py            # parse_document() dispatcher. EPUB (ebooklib+BS4, zipfile fallback) and TXT.
@@ -201,6 +206,12 @@ All env vars use the `RURU_` prefix. Defined in `config.py`. Data lives under `W
 | `RURU_YUE2_COT` | `full` | Chain-of-thought preset (`off`/`melody`/`full`) — also the Music form's Advanced CoT default |
 | `RURU_YUE2_MAX_SECONDS` | `90` | PyTorch-runtime song length cap (VRAM guard); per-job overridable from the Music form's Length field (1–300 s) |
 | `RURU_YUE2_INST_LORA_SCALE` | `1.0` | Instrumental LoRA merge scale (pytorch runtime only) |
+| `RURU_PHONON` | `auto` | Live TTS switch: `1`/`0`/`auto` (on iff the `phonon` extra imports) |
+| `RURU_PHONON_MODEL` | `hf://gradium/phonon-31m-en` | Live TTS model repo — Apache-2.0 31m only; anything matching `phonon-40m` raises (CC BY-NC) |
+| `RURU_PHONON_QUANT` | `q8` | Live TTS weight format |
+| `RURU_PHONON_LANG` | `en` | Text-normalization language (global for v1) |
+| `RURU_PHONON_THREADS` | `4` | CPU thread cap — set BEFORE the TTS handle is built (global pool, built once) |
+| `RURU_PHONON_MAX_CHARS` | `2000` | Live-endpoint text length cap (413 beyond it) |
 
 Note: there is no Redis/Celery anywhere — the job runner is fully in-process (`jobs/queue.py`).
 
@@ -260,7 +271,7 @@ Voices come from `voice_clones/` — an audio file plus a same-stem `.txt` trans
 
 ## Testing
 
-Pytest suite lives in `tests/` (unit tests for chunker, assembler, parsers, config, db, export, job models/queue/tasks, the YuE2 engine, and route tests for tts/voices/narrate/jobs/music). Run with `uv run pytest`. `pytest-asyncio` and `pytest-mock` are dev dependencies; model loading is mocked (`tests/conftest.py` provides `MOCK_WAV`, `fake_audio()`, and the `mock_tts_engine` fixture that patches the backend factory) so tests never touch the GPU.
+Pytest suite lives in `tests/` (unit tests for chunker, assembler, parsers, config, db, export, job models/queue/tasks, the YuE2 engine and the Phonon live engine, and route tests for tts/voices/narrate/jobs/music plus `test_routes_tts_live.py`/`test_phonon_engine.py` for the live endpoint). Run with `uv run pytest`. `pytest-asyncio` and `pytest-mock` are dev dependencies; model loading is mocked (`tests/conftest.py` provides `MOCK_WAV`, `fake_audio()`, and the `mock_tts_engine` fixture that patches the backend factory) so tests never touch the GPU.
 
 The whole suite must pass on **both** platforms. Two files carry that guarantee:
 - `tests/test_engine_contract.py` — checks every backend class against the ABC: signatures, `is_loaded` really being a property, synchronous methods, and that both generators return something tuple-unpackable *and* `.write()`-able. Tests needing a live runtime skip themselves.
