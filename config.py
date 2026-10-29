@@ -81,6 +81,21 @@ YUE2_COT = _env("YUE2_COT", "full")
 # Per-job overridable from the Music form's Length field (blank = this cap).
 YUE2_MAX_SECONDS = int(_env("YUE2_MAX_SECONDS", "90"))
 
+# --- Phonon live TTS (optional, CPU-only, playback-only) ---------------------
+# Feature switch: "1" = on, "0" = off, "auto" = on iff `import ptts` succeeds.
+# With ptts absent (or this "0") ruru behaves exactly as before.
+PHONON_MODE = _env("PHONON", "auto")
+# Model repo or local dir. Only the Apache-2.0 31m family is permitted; the
+# engine rejects any repo matching phonon-40m (CC BY-NC, noncommercial).
+PHONON_MODEL = _env("PHONON_MODEL", "hf://gradium/phonon-31m-en")
+PHONON_QUANT = _env("PHONON_QUANT", "q8")
+# Text-normalization language ("en", "fr", "de", "es", "pt", "none").
+PHONON_LANG = _env("PHONON_LANG", "en")
+# Cap on tensor-op CPU threads, so live TTS can't starve the box.
+PHONON_THREADS = int(_env("PHONON_THREADS", "4"))
+# Hard cap on live-endpoint text length (characters).
+PHONON_MAX_CHARS = int(_env("PHONON_MAX_CHARS", "2000"))
+
 
 def ensure_dirs():
     """Create all required data directories."""

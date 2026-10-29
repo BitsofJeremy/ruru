@@ -26,6 +26,9 @@ mlx  = ["mlx ; sys_platform == 'darwin'",
         # YuE2 MLX runtime: ahmadw/YuE2-3B-MLX generate.py tokenizes with tiktoken
         "tiktoken ; sys_platform == 'darwin'"]
 cuda = ["torch>=2.0.0", "qwen-tts"]
+# Phonon live TTS: torch-free Rust wheel (CPU-only), optional — ruru runs
+# unchanged without it (RURU_PHONON=auto probes the import).
+phonon = ["ptts>=0.5.0,<0.6"]
 
 [tool.uv]
 conflicts = [[{ extra = "mlx" }, { extra = "cuda" }]]

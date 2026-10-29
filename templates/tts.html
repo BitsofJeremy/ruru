@@ -15,10 +15,24 @@
 
     <div{% if active_jobs_count > 0 %} class="opacity-50 pointer-events-none"{% endif %}>
         <div class="bg-kj-card border border-kj-border rounded-xl p-6 max-w-2xl">
-            <form hx-post="/api/tts" hx-target="#tts-result" hx-swap="innerHTML" hx-indicator="#tts-spinner">
+            {% if phonon_available %}
+            <!-- Engine mode toggle: Qwen jobs vs Phonon live playback -->
+            <div class="flex gap-2 mb-5" id="tts-mode-toggle">
+                <button type="button" data-tts-mode="qwen"
+                        class="tts-mode-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    Qwen (clone/design)
+                </button>
+                <button type="button" data-tts-mode="phonon"
+                        class="tts-mode-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    Phonon live (canned voices)
+                </button>
+            </div>
+            {% endif %}
+
+            <form id="tts-form" hx-post="/api/tts" hx-target="#tts-result" hx-swap="innerHTML" hx-indicator="#tts-spinner">
             <div class="space-y-5">
-                <!-- Voice selector -->
-                <div>
+                <!-- Qwen voice selector (saved library) -->
+                <div id="qwen-voice-field">
                     <label for="voice_id" class="block text-sm font-medium text-kj-muted mb-2">Voice</label>
                     <select name="voice_id" id="voice_id"
                             hx-get="/api/tts/voice-preview"
@@ -33,6 +47,16 @@
                     <div id="voice-preview" class="mt-2"></div>
                 </div>
 
+                <!-- Phonon canned-voice dropdown (populated from the live catalog) -->
+                <div id="phonon-voice-field" class="hidden">
+                    <label for="phonon_voice" class="block text-sm font-medium text-kj-muted mb-2">Voice (canned)</label>
+                    <select id="phonon_voice"
+                            class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
+                        <option value="">Loading voices...</option>
+                    </select>
+                    <p class="text-xs text-kj-muted mt-1">Instant playback with built-in voices — nothing is saved to the voice library or history.</p>
+                </div>
+
                 <!-- Text input -->
                 <div>
                     <label for="text" class="block text-sm font-medium text-kj-muted mb-2">Text</label>
@@ -41,8 +65,8 @@
                               class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text placeholder-kj-muted/50 focus:outline-none focus:border-kj-accent resize-y"></textarea>
                 </div>
 
-                <!-- Format -->
-                <div>
+                <!-- Format (Qwen mode only — live mode is always WAV) -->
+                <div id="qwen-format-field">
                     <label for="audio_format" class="block text-sm font-medium text-kj-muted mb-2">Format</label>
                     <select name="audio_format" id="audio_format"
                             class="w-full bg-kj-bg border border-kj-border rounded-lg px-4 py-2.5 text-kj-text focus:outline-none focus:border-kj-accent">
@@ -54,10 +78,15 @@
 
                 <!-- Submit -->
                 <div class="flex items-center gap-4">
-                    <button type="submit"
+                    <button type="submit" id="qwen-generate-btn"
                             class="px-6 py-2.5 bg-kj-accent hover:bg-kj-accent/80 text-white font-medium rounded-lg transition-colors">
                         Generate
                     </button>
+                    {% if phonon_available %}
+                    <button type="button" id="phonon-generate-btn" class="hidden px-6 py-2.5 bg-kj-accent hover:bg-kj-accent/80 text-white font-medium rounded-lg transition-colors">
+                        Generate &amp; play
+                    </button>
+                    {% endif %}
                     <div id="tts-spinner" class="htmx-indicator flex items-center gap-2 text-kj-muted text-sm">
                         <div class="animate-spin h-4 w-4 border-2 border-kj-accent2 border-t-transparent rounded-full"></div>
                         <span>Generating audio... this may take a minute</span>
@@ -82,4 +111,123 @@
         </div>
     </div>
 </div>
+
+{% if phonon_available %}
+<script>
+(function () {
+    var form = document.getElementById('tts-form');
+    var qwenFields = ['qwen-voice-field', 'qwen-format-field'].map(function (id) {
+        return document.getElementById(id);
+    });
+    var phononField = document.getElementById('phonon-voice-field');
+    var phononSelect = document.getElementById('phonon_voice');
+    var qwenBtn = document.getElementById('qwen-generate-btn');
+    var phononBtn = document.getElementById('phonon-generate-btn');
+    var spinner = document.getElementById('tts-spinner');
+    var result = document.getElementById('tts-result');
+    var mode = 'qwen';
+    var voicesLoaded = false;
+
+    var LANG_LABELS = {
+        'en': '🇬🇧 English', 'en-US': '🇺🇸 English (US)', 'en-UK': '🇬🇧 English (UK)',
+        'fr': '🇫🇷 French', 'de': '🇩🇪 German', 'es': '🇪🇸 Spanish',
+        'pt': '🇵🇹 Portuguese'
+    };
+
+    function setMode(next) {
+        mode = next;
+        var phonon = next === 'phonon';
+        qwenFields.forEach(function (el) { el.classList.toggle('hidden', phonon); });
+        phononField.classList.toggle('hidden', !phonon);
+        qwenBtn.classList.toggle('hidden', phonon);
+        phononBtn.classList.toggle('hidden', !phonon);
+        document.querySelectorAll('.tts-mode-btn').forEach(function (btn) {
+            var active = btn.dataset.ttsMode === next;
+            btn.classList.toggle('bg-kj-accent', active);
+            btn.classList.toggle('text-white', active);
+            btn.classList.toggle('bg-kj-bg', !active);
+            btn.classList.toggle('text-kj-muted', !active);
+        });
+        if (phonon && !voicesLoaded) loadVoices();
+    }
+
+    function loadVoices() {
+        fetch('/api/tts/live/voices')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                voicesLoaded = true;
+                if (!data.available || !data.voices.length) {
+                    phononSelect.innerHTML = '<option value="">Phonon voices unavailable</option>';
+                    return;
+                }
+                var byLang = {};
+                data.voices.forEach(function (v) {
+                    (byLang[v.language || 'other'] = byLang[v.language || 'other'] || []).push(v);
+                });
+                phononSelect.innerHTML = '';
+                Object.keys(byLang).sort().forEach(function (lang) {
+                    var group = document.createElement('optgroup');
+                    group.label = LANG_LABELS[lang] || lang;
+                    byLang[lang].forEach(function (v) {
+                        var opt = document.createElement('option');
+                        opt.value = v.name;
+                        opt.textContent = v.name;
+                        if (v.description) opt.title = v.description;
+                        phononSelect.appendChild(opt);
+                    });
+                });
+                // Jeremy's default: Bryony, when the catalog has it.
+                if ([].some.call(phononSelect.options, function (o) { return o.value === 'Bryony'; })) {
+                    phononSelect.value = 'Bryony';
+                }
+            })
+            .catch(function () {
+                phononSelect.innerHTML = '<option value="">Failed to load voices</option>';
+            });
+    }
+
+    function setResult(html) { result.innerHTML = html; }
+
+    phononBtn.addEventListener('click', function () {
+        var text = document.getElementById('text').value.trim();
+        if (!text) {
+            setResult('<p class="text-red-500">Text required.</p>');
+            return;
+        }
+        phononBtn.disabled = true;
+        spinner.classList.add('htmx-request');
+        fetch('/api/tts/live', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text, voice: phononSelect.value, format: 'wav' })
+        })
+        .then(function (r) {
+            if (!r.ok) {
+                return r.json().catch(function () { return {}; }).then(function (body) {
+                    throw new Error(body.message || ('HTTP ' + r.status));
+                });
+            }
+            return r.blob();
+        })
+        .then(function (blob) {
+            var url = URL.createObjectURL(blob);
+            setResult('<div><audio controls autoplay class="w-full mt-2"><source src="' + url +
+                      '" type="audio/wav"></audio><p class="text-xs text-kj-muted mt-1">Live Phonon clip — playback only, not saved.</p></div>');
+        })
+        .catch(function (err) {
+            setResult('<p class="text-red-500">Live TTS failed: ' + err.message + '</p>');
+        })
+        .finally(function () {
+            phononBtn.disabled = false;
+            spinner.classList.remove('htmx-request');
+        });
+    });
+
+    document.querySelectorAll('.tts-mode-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () { setMode(btn.dataset.ttsMode); });
+    });
+    setMode('qwen');
+})();
+</script>
+{% endif %}
 {% endblock %}

@@ -9,6 +9,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -93,6 +94,7 @@ env.filters['basename'] = lambda p: Path(p).name
 # renders both in the sidebar; app_version used to come out blank because no route
 # supplied it.
 from engine import get_backend_label
+from engine import phonon_engine
 
 env.globals['app_version'] = APP_VERSION
 env.globals['backend_label'] = get_backend_label()
@@ -118,6 +120,12 @@ async def app_lifespan(app):
         scan_voice_clones(DB_PATH, _REPO_ROOT / "voice_clones", VOICE_DIR)
     except Exception:
         logger.warning("voice_clones scan failed", exc_info=True)
+
+    # Phonon live TTS: warm the model in the background so the first real
+    # request doesn't pay the load. Log-only — never blocks serving.
+    if phonon_engine.phonon_available():
+        threading.Thread(target=phonon_engine.warm, daemon=True,
+                         name="phonon-warm").start()
     get_runner().start()
     logger.info("ruru started")
 
@@ -619,7 +627,9 @@ async def tts_page():
         active_jobs_count = await session.scalar(
             sqlalchemy.select(func.count()).select_from(Job).where(Job.status.in_(('queued', 'running')))
         )
-    return HTMLResponse(render("tts.html", voices=list(voices), active_jobs_count=active_jobs_count))
+    return HTMLResponse(render("tts.html", voices=list(voices),
+                               active_jobs_count=active_jobs_count,
+                               phonon_available=phonon_engine.phonon_available()))
 
 @app.post("/api/tts", response_class=HTMLResponse)
 async def api_tts(request: Request):
@@ -701,6 +711,63 @@ async def api_tts_clips():
         if job.output_path
     ]
     return HTMLResponse(render("partials/tts_clips.html", clips=clips))
+
+# -----------------------------------------------------------------------------
+# Phonon live TTS — optional, CPU-only, playback-only. No Job row, no Voice
+# row, nothing under OUTPUT_DIR; when ptts is absent or RURU_PHONON=0 these
+# routes return the disabled shapes and nothing else in ruru changes.
+# -----------------------------------------------------------------------------
+
+@app.get("/api/tts/live/voices")
+async def api_tts_live_voices():
+    """Canned Phonon voice catalog for the /tts page dropdown (200 even when
+    disabled, so clients can probe cheaply)."""
+    if not phonon_engine.phonon_available():
+        return JSONResponse({"available": False, "voices": []})
+    try:
+        voices = await asyncio.to_thread(phonon_engine.voices)
+    except Exception:
+        logger.warning("phonon voice catalog failed", exc_info=True)
+        return JSONResponse({"available": False, "voices": []})
+    return JSONResponse({"available": True, "voices": voices})
+
+
+@app.post("/api/tts/live")
+async def api_tts_live(request: Request):
+    """Live TTS playback only — binary WAV response, nothing persisted."""
+    if not phonon_engine.phonon_available():
+        return JSONResponse({"status": "feature_disabled"}, status_code=503)
+
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    voice = (body.get("voice") or "").strip()
+    audio_format = (body.get("format") or "wav").strip().lower()
+
+    if not text:
+        return JSONResponse({"status": "failed", "message": "text required"},
+                            status_code=400)
+    if audio_format != "wav":
+        return JSONResponse({"status": "failed",
+                             "message": f"unsupported format {audio_format!r} (only 'wav')"},
+                            status_code=400)
+    if len(text) > config.PHONON_MAX_CHARS:
+        return JSONResponse({"status": "failed",
+                             "message": f"text exceeds {config.PHONON_MAX_CHARS} characters"},
+                            status_code=413)
+    if not phonon_engine.voice_exists(voice):
+        return JSONResponse({"status": "failed", "message": "Voice not found."},
+                            status_code=404)
+
+    try:
+        wav = await asyncio.to_thread(phonon_engine.generate_wav_bytes, text, voice)
+    except ValueError as exc:  # forbidden-model guard
+        return JSONResponse({"status": "failed", "message": str(exc)}, status_code=400)
+    except Exception:
+        logger.exception("phonon live generation failed")
+        return JSONResponse({"status": "failed", "message": "generation failed"},
+                            status_code=500)
+    return Response(content=wav, media_type="audio/wav")
+
 
 # =============================================================================
 # Shared job helpers — format-sibling probing + delete sweep (v0.8.0)
