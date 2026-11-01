@@ -113,9 +113,48 @@ def render(template_name, **context):
 import asyncio
 
 
+async def recover_orphaned_jobs() -> int:
+    """Sweep jobs stuck in queued/running at startup to failed.
+
+    The JobRunner is in-process: a freshly started ruru process owns no
+    workers, so any queued/running row it finds can only be a leftover from
+    a previous process that died mid-job (restart, crash, systemd kill).
+    Left unswept, such rows hold the Quick TTS form lock forever — tts_page
+    counts status IN ('queued', 'running') with no staleness check.
+
+    Uses the global session factory, so must run AFTER init_db() (which
+    binds it to DB_PATH) and BEFORE get_runner().start() (so the sweep can
+    never touch a job this process is about to run). Returns the number of
+    rows swept.
+    """
+    from jobs.models import JobStatus
+    from models.db import Job, get_async_session
+
+    async with get_async_session() as session:
+        result = await session.execute(
+            sqlalchemy.update(Job)
+            .where(Job.status.in_((JobStatus.QUEUED.value, JobStatus.RUNNING.value)))
+            .values(
+                status=JobStatus.FAILED.value,
+                error_message="interrupted: ruru restarted while this job was active",
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await session.commit()
+        return result.rowcount or 0
+
+
 async def app_lifespan(app):
     """FastAPI lifespan handler — replaces deprecated on_event."""
     await init_db(DB_PATH)
+    try:
+        swept = await recover_orphaned_jobs()
+        if swept:
+            logger.info(
+                "startup recovery: marked %d orphaned queued/running job(s) failed", swept
+            )
+    except Exception:
+        logger.warning("startup job recovery failed", exc_info=True)
     try:
         scan_voice_clones(DB_PATH, _REPO_ROOT / "voice_clones", VOICE_DIR)
     except Exception:
