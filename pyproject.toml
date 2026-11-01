@@ -29,12 +29,16 @@ cuda = ["torch>=2.0.0", "qwen-tts"]
 # Phonon live TTS: torch-free Rust wheel (CPU-only), optional — ruru runs
 # unchanged without it (RURU_PHONON=auto probes the import).
 phonon = ["ptts>=0.5.0,<0.6"]
+# MCP stdio server (ruru-mcp): exposes the running ruru HTTP API as tools
+# for Claude Code and other MCP clients.
+mcp = ["mcp>=1.2.0"]
 
 [tool.uv]
 conflicts = [[{ extra = "mlx" }, { extra = "cuda" }]]
 
 [project.scripts]
 ruru = "app:main"
+ruru-mcp = "mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
