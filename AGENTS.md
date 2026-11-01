@@ -16,7 +16,7 @@ production clone.
 
 | | Development | Production |
 |---|---|---|
-| **macOS (MLX)** | `~/Documents/current_projects/ai_speech/ruru` — Syncthing-synced | `~/bin/ruru` — launchd agent `com.jeremy.ruru.web`, port 5151 |
+| **macOS (MLX)** | `~/Documents/current_projects/ruru` — Syncthing-synced | `~/bin/ruru` — launchd agent `com.jeremy.ruru.web`, port 5151 |
 | **Linux (CUDA)** | a plain `git clone` — Syncthing-synced | `/8TB/bin/ruru` — `ruru-web.service` + nginx at `ruru.nexus.home.test` |
 
 Why it's arranged this way:
@@ -38,9 +38,10 @@ Verify in dev, then update production, and restart the service **last**:
    **real** model load and narrate job. The suite mocks the engine, so a green
    run alone proves nothing about TTS actually working.
 2. Commit and push from dev.
-3. In the production clone: `git pull`, then `uv sync --extra mlx` (macOS) or
-   `uv sync --extra cuda` (Linux), then re-run the suite and one real
-   generation **before** touching the service.
+3. In the production clone: `git pull`, then `uv sync --extra mlx --extra
+   phonon --extra mcp` (macOS) or `uv sync --extra cuda --extra phonon
+   --extra mcp` (Linux), then re-run the suite and one real generation
+   **before** touching the service.
 4. Only then `./reset_service.sh restart-only`. Confirm the old PID is gone, a
    new process holds 5151, and the site answers.
 
@@ -66,14 +67,17 @@ install a service pointing at whatever directory they live in.
 # Install dependencies (pick the extra matching your hardware)
 uv sync --extra mlx     # Apple Silicon
 uv sync --extra cuda    # NVIDIA/Linux
+# Feature extras — phonon (live TTS), mcp (MCP stdio server). E.g. a full
+# macOS dev install:
+uv sync --extra mlx --extra phonon --extra mcp
 
 # Run (single process, no worker needed)
 uv run ruru
 # Or directly
 uv run app.py
 
-# Run tests
-uv run pytest
+# Run tests (the python -m form is immune to a stale entry-point shebang)
+uv run python -m pytest
 uv run pytest tests/test_chunker.py           # a single file
 uv run pytest tests/test_chunker.py::test_name # a single test
 
@@ -83,6 +87,10 @@ sudo bash install_macos.sh
 sudo bash install_linux.sh
 ./reset_service.sh restart-only               # restart the service (either platform)
 ```
+
+If `uv run pytest` dies with a shebang pointing at a path that no longer exists (the repo has
+moved), `uv sync --reinstall-package pytest` rebuilds the entry-point script; `uv run python -m
+pytest` always works.
 
 Useful env overrides:
 ```bash
@@ -132,6 +140,11 @@ Jobs persist in SQLite with status (queued/running/completed/failed). A backgrou
 
 ```
 app.py                  # FastAPI entry point + all API routes.
+mcp_server.py           # MCP stdio server (`mcp` extra, `ruru-mcp` console
+                        #   script) — wraps the HTTP API as Claude Code tools.
+                        #   Stdlib HTTP client at module level; the MCP server
+                        #   class is imported lazily inside build_server()
+                        #   (mcp 2.x MCPServer, 1.x FastMCP fallback).
 config.py               # All settings via RURU_ env vars.
 jobs/
   __init__.py
@@ -225,7 +238,7 @@ cd ~/bin/ruru
 sudo bash install_macos.sh
 ```
 
-`install_macos.sh` is sudo-safe: it derives paths from the script location (never `$HOME`), re-runs user-level steps (`uv sync --extra mlx`, DB init, the launchd *user* agent) as `SUDO_USER`, and only uses root for nginx on port 80. The launchd agent lands in `~/Library/LaunchAgents/com.jeremy.ruru.web.plist`.
+`install_macos.sh` is sudo-safe: it derives paths from the script location (never `$HOME`), re-runs user-level steps (`uv sync --extra mlx --extra phonon --extra mcp`, DB init, the launchd *user* agent) as `SUDO_USER`, and only uses root for nginx on port 80. The launchd agent lands in `~/Library/LaunchAgents/com.jeremy.ruru.web.plist`.
 
 Use `reset_service.sh` to manage the running service: `restart-only`, `clean-only`, `reset-db`, `clean-all` (see `reset_service.sh help`). It detects the platform and drives `launchctl` or `systemctl` accordingly. On macOS, logs go to `data/logs/ruru.{log,err}`.
 
@@ -237,7 +250,7 @@ git clone git@github.com:BitsofJeremy/ruru.git /8TB/bin/ruru
 cd /8TB/bin/ruru && sudo bash install_linux.sh
 ```
 
-`install_linux.sh` is sudo-safe in the same way: paths come from the script location, `uv sync --extra cuda` and DB init run as `SUDO_USER`, and root is only used for the systemd unit and nginx. It installs `ruru-web.service` (env: `RURU_TTS_BACKEND=cuda`, `RURU_MODEL_SIZE=large`, `HF_HOME` pointed at the existing weight cache) and an nginx vhost for `ruru.nexus.home.test` → `127.0.0.1:5151`. It also retires the old `sprecher-web` service and vhost — ruru is its successor. Logs go to the journal: `journalctl -u ruru-web -f`.
+`install_linux.sh` is sudo-safe in the same way: paths come from the script location, `uv sync --extra cuda --extra phonon --extra mcp` and DB init run as `SUDO_USER`, and root is only used for the systemd unit and nginx. It installs `ruru-web.service` (env: `RURU_TTS_BACKEND=cuda`, `RURU_MODEL_SIZE=large`, `HF_HOME` pointed at the existing weight cache) and an nginx vhost for `ruru.nexus.home.test` → `127.0.0.1:5151`. It also retires the old `sprecher-web` service and vhost — ruru is its successor. Logs go to the journal: `journalctl -u ruru-web -f`.
 
 **Never run the installer from the Syncthing-synced dev checkout.** A macOS `.venv` syncing into a live service directory leaves a dangling interpreter symlink, which is exactly how `sprecher-web.service` ended up crash-looping with `203/EXEC`.
 
@@ -271,7 +284,7 @@ Voices come from `voice_clones/` — an audio file plus a same-stem `.txt` trans
 
 ## Testing
 
-Pytest suite lives in `tests/` (unit tests for chunker, assembler, parsers, config, db, export, job models/queue/tasks, the YuE2 engine and the Phonon live engine, and route tests for tts/voices/narrate/jobs/music plus `test_routes_tts_live.py`/`test_phonon_engine.py` for the live endpoint). Run with `uv run pytest`. `pytest-asyncio` and `pytest-mock` are dev dependencies; model loading is mocked (`tests/conftest.py` provides `MOCK_WAV`, `fake_audio()`, and the `mock_tts_engine` fixture that patches the backend factory) so tests never touch the GPU.
+Pytest suite lives in `tests/` (unit tests for chunker, assembler, parsers, config, db, export, job models/queue/tasks, the YuE2 engine and the Phonon live engine, and route tests for tts/voices/narrate/jobs/music plus `test_routes_tts_live.py`/`test_phonon_engine.py` for the live endpoint and `test_mcp_server.py` for the MCP server's HTTP-client layer). Run with `uv run python -m pytest` (or `uv run pytest` once the entry point is fresh). `pytest-asyncio` and `pytest-mock` are dev dependencies; model loading is mocked (`tests/conftest.py` provides `MOCK_WAV`, `fake_audio()`, and the `mock_tts_engine` fixture that patches the backend factory) so tests never touch the GPU.
 
 The whole suite must pass on **both** platforms. Two files carry that guarantee:
 - `tests/test_engine_contract.py` — checks every backend class against the ABC: signatures, `is_loaded` really being a property, synchronous methods, and that both generators return something tuple-unpackable *and* `.write()`-able. Tests needing a live runtime skip themselves.
@@ -288,5 +301,6 @@ See `TODO.md` for the full list. Open items: no CSRF protection (acceptable for 
 ## Project Directories
 
 - `.claude/` — legacy Claude Code session config (safe to ignore)
+- `~/.claude/hooks/utils/tts/` (outside the repo) — Claude Code TTS hook scripts that drive the HTTP API: `phonon_live_hook.py` (Phonon live, voice Hugh) and the older Qwen `qwen_tts_hook.py`
 - `.worktrees/` — Isolated git worktrees created by the `superpowers:using-git-worktrees` skill
 - `voice_clones/` — Voice clone reference audio + matching `.txt` transcripts (version-controlled)

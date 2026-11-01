@@ -427,6 +427,20 @@ weights are CC BY-NC and rejected in code), `RURU_PHONON_QUANT` (q8),
 `RURU_PHONON_LANG` (global; per-request language is a planned extension),
 `RURU_PHONON_THREADS` (4), `RURU_PHONON_MAX_CHARS` (2000).
 
+### MCP server (ruru-mcp) — optional
+
+`mcp_server.py` wraps the JSON API as an [MCP](https://modelcontextprotocol.io)
+stdio server so MCP clients like Claude Code can drive ruru as tools: `speak`
+(Phonon live, canned voices — default Hugh), `generate_tts`, `list_voices`,
+`list_live_voices`, `job_status`, `delete_job`, `health`. Install the `mcp`
+extra and register the binary from a stable checkout (the production clone),
+not a moving dev tree:
+
+```bash
+uv sync --extra mlx --extra phonon --extra mcp
+claude mcp add --scope user ruru -- "$HOME/bin/ruru/.venv/bin/ruru-mcp"
+```
+
 ## License
 
 GNU AFFERO GENERAL PUBLIC LICENSE

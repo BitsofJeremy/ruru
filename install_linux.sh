@@ -120,15 +120,15 @@ chown -R "$REAL_USER:$REAL_GROUP" "$WORK_DIR"
 # ---------------------------------------------------------------------------
 # 5. Python environment (uv sync --extra cuda) — as real user
 # ---------------------------------------------------------------------------
-c "🐍 4/7  Syncing Python dependencies (uv sync --extra cuda)..."
+c "🐍 4/7  Syncing Python dependencies (uv sync --extra cuda --extra phonon --extra mcp)..."
 if [[ -x "$UV_BIN" ]]; then
-    as_user "$UV_BIN" sync --project "$APP_DIR" --extra cuda
+    as_user "$UV_BIN" sync --project "$APP_DIR" --extra cuda --extra phonon --extra mcp
 else
     err "   uv not found ($UV_BIN) — skipping sync. Ensure the venv already exists."
 fi
 if [[ ! -x "$VENV_BIN" ]]; then
     err "❌ Missing executable: $VENV_BIN"
-    echo "   Run as $REAL_USER:  cd \"$APP_DIR\" && uv sync --extra cuda"
+    echo "   Run as $REAL_USER:  cd \"$APP_DIR\" && uv sync --extra cuda --extra phonon --extra mcp"
     exit 1
 fi
 
