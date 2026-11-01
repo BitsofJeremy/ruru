@@ -422,6 +422,25 @@ the toggle never renders and ruru behaves exactly as before. JSON API:
 | `GET /api/tts/live/voices` | `{"available": bool, "voices": [{name, voice_id, language, description}, ...]}` |
 | `POST /api/tts/live` | Body `{"text", "voice", "format": "wav"}` → binary 24 kHz mono WAV. Errors: 400 empty text/bad format, 413 over `RURU_PHONON_MAX_CHARS`, 404 unknown voice, 503 when disabled |
 
+Try it from the shell — `GET /api/tts/live/voices` doubles as the availability
+probe (`"available": true` means the extra is installed and enabled):
+
+```bash
+# Browse the 102-voice catalog
+curl -s http://localhost:5151/api/tts/live/voices | python3 -m json.tool
+
+# Have Hugh say hello — the response body is a 24 kHz mono WAV
+curl -s -X POST http://localhost:5151/api/tts/live \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "Hello from ruru.", "voice": "Hugh", "format": "wav"}' \
+  -o /tmp/hello.wav
+
+afplay /tmp/hello.wav   # macOS; on Linux: aplay /tmp/hello.wav or ffplay -autoexit /tmp/hello.wav
+```
+
+Full request/response details for these and every other endpoint live in
+[docs/API.md](docs/API.md).
+
 Knobs: `RURU_PHONON` (`1`/`0`/`auto`), `RURU_PHONON_MODEL` (31m only — 40m
 weights are CC BY-NC and rejected in code), `RURU_PHONON_QUANT` (q8),
 `RURU_PHONON_LANG` (global; per-request language is a planned extension),

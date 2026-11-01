@@ -33,8 +33,10 @@ venv/
 *.swp
 *.swo
 
-# Project runtime / user data
-docs/
+# Project runtime / user data (docs/ is working notes; the published
+# API reference is the one tracked exception — README links to it)
+docs/*
+!docs/API.md
 clone_voices/
 example_epubs/
 data/
