@@ -140,7 +140,10 @@ class TestResolveLiveBase:
                 raise urllib.error.URLError("connection refused")
             return JsonResp({"available": True, "voices": []})
 
+        calls = http(handler)
+
         assert mcp_server.resolve_live_base() == "http://ruru.nexus.home.test"
+        assert len(calls) == 2
 
     def test_no_live_host_raises(self, http):
         http(lambda url, req: JsonResp({"available": False, "voices": []}))
