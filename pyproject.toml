@@ -32,7 +32,15 @@ mlx  = ["mlx ; sys_platform == 'darwin'",
         "mlx-audio>=0.4.4 ; sys_platform == 'darwin'",
         # YuE2 MLX runtime: ahmadw/YuE2-3B-MLX generate.py tokenizes with tiktoken
         "tiktoken ; sys_platform == 'darwin'"]
-cuda = ["torch>=2.0.0", "qwen-tts"]
+# transformers MUST stay on 4.x for the CUDA clone path: transformers 5.x
+# changed `check_model_inputs` from a decorator-factory (`@check_model_inputs()`)
+# to a plain decorator, so the Qwen3-TTS voice-clone model code (4.x-style
+# snapshots in the HF cache) dies with "missing 1 required positional argument:
+# 'func'" on EVERY cloned-voice generation. The lockfile can silently resolve
+# 5.x when re-synced without this bound (it happened 2026-11-02, v0.9.0 update:
+# every /api/tts/generate with a cloned voice returned HTTP 500). The mlx extra
+# is unaffected — do not add the bound there.
+cuda = ["torch>=2.0.0", "qwen-tts", "transformers>=4.57.3,<5"]
 # Phonon live TTS: torch-free Rust wheel (CPU-only), optional — ruru runs
 # unchanged without it (RURU_PHONON=auto probes the import).
 phonon = ["ptts>=0.5.0,<0.6"]

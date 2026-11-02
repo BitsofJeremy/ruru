@@ -141,6 +141,30 @@ journalctl -u ruru-web -f
 
 `reset_service.sh` detects the platform and drives `launchctl` or `systemctl` accordingly.
 
+### Post-update smoke test (Linux / CUDA)
+
+After any dependency-changing update (`git pull` + `uv sync --extra cuda`), before
+anything that depends on TTS unattended (cron pipelines, morning briefings):
+
+1. `uv pip list | grep transformers` — must be **4.57.x**. The pyproject bounds it
+   `<5`, but if you ever bypass the lock (`uv pip install -U`, hand installs),
+   5.x will silently win and break voice cloning (see the `cuda` extra comment in
+   `pyproject.toml` for why).
+2. One real cloned-voice probe:
+
+```bash
+curl -s -X POST http://127.0.0.1:5151/api/tts/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Post-update smoke test.","voice_id":1}'
+# expect {"status":"completed","audio_url":...} — then play/listen to the file
+```
+
+3. Reinstall the two wheels `uv sync` always prunes: `yue2_infer` (`--no-deps`)
+   and `tiktoken`; if Phonon is enabled, `ptts` too (or use `--extra phonon`).
+
+Symptom if skipped: cloned voices return `HTTP 500` with an HTML error page while
+designed voices still work — check `journalctl -u ruru-web` for the real error.
+
 ## Configuration
 
 All settings are controlled via environment variables with the `RURU_` prefix.
