@@ -346,21 +346,17 @@ snapshot_download('audio-cpp/Yue2-3B-GGUF',
 export RURU_YUE2_AUDIOCPP_BIN=/path/to/audiocpp/binary
 ```
 
-**Setup (instrumental LoRA / pytorch runtime):** install
-`huggingface-hub==0.36.2` + the `yue2_infer-0.1.5-py3-none-any.whl` from
-`m-a-p/YuE2-3B` (watch the `transformers==4.57.3` pin from `qwen-tts` — use
-`--no-deps` if uv reports a conflict).
+**Setup (instrumental LoRA / pytorch runtime):** nothing to install by hand.
+`yue2-infer` is declared in `pyproject.toml` (Linux-only) and resolved from
+the vendored `yue2_infer-0.1.5-py3-none-any.whl` in the repo root, so
+`uv sync` installs it and keeps it; `tiktoken` arrives as its dependency.
 
-> **⚠️ `uv sync` removes yue2-infer.** Because it's installed `--no-deps`
-> (outside the lockfile), every `uv sync --extra cuda` prunes it. After any
-> sync, reinstall before music will work:
-> ```bash
-> uv pip install --python .venv/bin/python --no-deps ./yue2_infer-0.1.5-py3-none-any.whl tiktoken
-> ```
-> (Download the wheel from the `m-a-p/YuE2-3B` HF repo.) Symptom if forgotten:
-> the Music page shows the Instrumental checkbox as unavailable, and an
-> instrumental request fails with a "reinstall per README" error instead of a
-> bare `ModuleNotFoundError: No module named 'yue2'`.
+> The vendored wheel's dependency pins are relaxed relative to upstream
+> (`torch>=2.6`, `transformers>=4.51`, … instead of upstream's exact `==`
+> pins), because upstream pins hard-conflict with the `cuda` stack
+> (`qwen-tts` pins `transformers==4.57.3`). Don't swap in a pristine
+> upstream wheel — resolution would either fail or downgrade torch and
+> break TTS with it.
 
 **The form:** a style prompt and lyrics/structure tags are required, plus an
 Instrumental checkbox (pytorch LoRA — disabled where unavailable). **Seed** —

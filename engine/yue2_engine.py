@@ -113,8 +113,8 @@ class YuE2Engine:
             )
         return RuntimeError(
             f"YuE2 PyTorch runtime unavailable ({reason}). The yue2_infer "
-            "wheel is installed --no-deps outside the lockfile: if uv sync "
-            "pruned it, reinstall per README 'Music (YuE2)'."
+            "wheel is vendored in the repo and installed by uv sync; if it "
+            "is missing, re-run uv sync — see README 'Music (YuE2)'."
         )
 
     # -- generation ---------------------------------------------------------
